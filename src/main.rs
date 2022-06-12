@@ -1,6 +1,7 @@
 mod db;
 mod json;
 
+use actix_web::Responder;
 use std::sync::Arc;
 use std::sync::Mutex;
 use actix_web::{post, web, App, HttpServer};
@@ -41,12 +42,13 @@ impl DbState {
 }
 
 #[post("/eval")]
-async fn eval(cmd: web::Json<Cmd>, db_state: web::Data<DbState>) -> String {
+async fn eval(cmd: web::Json<Cmd>, db_state: web::Data<DbState>) -> impl Responder {
     println!("{:?}", cmd);
     let mut db = db_state.db.lock().unwrap();
     match db.eval(cmd.into_inner()) {
-         Ok(val) => serde_json::to_string(val.as_ref()).unwrap(),
-         Err(val) => val.to_string(),
+        Ok(JsonVal::Val(val)) => web::Json(val),
+        Ok(JsonVal::Arc(val)) =>  web::Json(val.as_ref().clone()),
+        _ => unimplemented!()
     }
 }
 
