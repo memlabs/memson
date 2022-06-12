@@ -1,4 +1,4 @@
-use crate::json::json_sum;
+use crate::json;
 use std::sync::Arc;
 use std::collections::BTreeMap;
 use crate::Json;
@@ -45,7 +45,7 @@ impl Db {
             Cmd::Val(val) => Ok(Arc::new(val).clone()),
             Cmd::Sum(arg) => {
                 let arg = self.eval(*arg)?;
-                let val = json_sum(arg.as_ref());
+                let val = json::sum(arg.as_ref());
                 Ok(Arc::new(Json::from(val)))
             }
         }
