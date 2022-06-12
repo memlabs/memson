@@ -17,7 +17,9 @@ pub enum Cmd {
     First(Box<Cmd>),            
     #[serde(rename="get")]
     Get(String),
-    #[serde(rename="last")]
+    #[serde(rename="key")]
+    Key(String, Box<Cmd>),
+    #[serde(rename="last")]    
     Last(Box<Cmd>),  
     #[serde(rename="max")]
     Max(Box<Cmd>),        
@@ -73,6 +75,10 @@ impl Db {
             Cmd::Div(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &json::div),
             Cmd::First(arg) => self.eval_unary_cmd(*arg, &json::first),
             Cmd::Get(key) => self.get_val(&key),
+            Cmd::Key(key, arg) => {
+                let val = self.eval(*arg)?;
+                Ok(JsonVal::Val(self.eval_key(&key, val.as_ref())))
+            }
             Cmd::Last(arg) =>self.eval_unary_cmd(*arg, &json::last),
             Cmd::Max(arg) => self.eval_unary_cmd(*arg, &json::max),
             Cmd::Min(arg) => self.eval_unary_cmd(*arg, &json::min),
@@ -83,6 +89,10 @@ impl Db {
             Cmd::Sums(arg) => self.eval_unary_cmd(*arg, &json::sums),
             Cmd::Val(val) => Ok(JsonVal::Val(val)),
         }
+    }
+
+    fn eval_key(&self, key: &str, val: &Json) -> Json {
+        json::key(key, val)
     }
 
     fn eval_unary_cmd<F:Fn(&Json) -> Json>(&mut self, arg: Cmd, f: F) -> Result<JsonVal> {
