@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use actix_web::{post, web, App, HttpServer};
 use db::{Cmd, Db};
 
-type Result<T> = std::result::Result<T, String>;
+type Result<T> = std::result::Result<T, &'static str>;
 type Json = serde_json::Value;
 
 struct DbState {
@@ -24,7 +24,7 @@ async fn eval(cmd: web::Json<Cmd>, db_state: web::Data<DbState>) -> String {
     let mut db = db_state.db.lock().unwrap();
     match db.eval(cmd.into_inner()) {
          Ok(val) => serde_json::to_string(val.as_ref()).unwrap(),
-         Err(val) => val,
+         Err(val) => val.to_string(),
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::json;
 use std::sync::Arc;
 use std::collections::BTreeMap;
-use crate::Json;
+use crate::{Result,Json};
 use serde::{Deserialize,Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,7 +35,7 @@ impl Db {
         self.data.insert(key, val)
     }
 
-    pub fn eval(&mut self, cmd: Cmd) -> Result<Arc<Json>, String> {
+    pub fn eval(&mut self, cmd: Cmd) -> Result<Arc<Json>> {
         match cmd {
             Cmd::Get(key) => Ok(self.get(&key).unwrap_or(Arc::new(Json::Null))),
             Cmd::Set(key, arg) => {

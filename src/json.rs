@@ -20,11 +20,9 @@ pub fn add(x: &Json, y: &Json) -> Json {
 pub fn sum(val: &Json) -> Json {
     match val {
         Json::Array(arr) => {
-            let mut sum = Json::from(0f64);
+            let mut sum = Json::from(0i64);
             for e in arr {
-                if let Some(val) = e.as_f64() {
-                    sum = add(&sum, e);
-                }
+                sum = add(&sum, e);
             }
             sum
         }
@@ -39,8 +37,8 @@ mod tests {
     
     #[test]
     fn json_sums() {
-        assert_eq!(sum(&Json::from(1i64)), 1.0);
+        assert_eq!(sum(&Json::from(1i64)), 1);
         assert_eq!(sum(&Json::from(1.23f64)), 1.23);
-        assert_eq!(sum(&Json::from(vec![1i64,2,3])), 6.0);
+        assert_eq!(sum(&Json::from(vec![1i64,2,3])), 6);
     }
 }
