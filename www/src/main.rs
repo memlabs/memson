@@ -1,34 +1,13 @@
-mod db;
-mod json;
+// actix-web = "4"
+extern crate db;
 
 use std::sync::Arc;
 use std::sync::Mutex;
 use actix_web::{post, web, App, HttpServer};
-use db::{Cmd, Db};
+use db::{Cmd,Db};
 
-pub enum JsonVal {
-    Val(Json),
-    Arc(Arc<Json>),
-}
 
-impl JsonVal {
-    pub fn as_ref(&self) -> &Json {
-        match self {
-            JsonVal::Val(val) => val,
-            JsonVal::Arc(val) => val.as_ref(),
-        }
-    }
 
-    pub fn to_arc(self) -> Arc<Json> {
-        match self {
-            JsonVal::Val(val) => Arc::new(val),
-            JsonVal::Arc(val) => val.clone(),
-        }
-    }
-}
-
-type Result<T> = std::result::Result<T, &'static str>;
-type Json = serde_json::Value;
 
 struct DbState {
     db: Mutex<Db>

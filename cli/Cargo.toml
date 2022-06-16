@@ -1,0 +1,11 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "*", features = ["full"] }
+futures = "*"
+serde_json = "*"
+tokio-util = { version = "*", features=["codec"]}
+tokio-serde = { version = "*", features=["json"]}
