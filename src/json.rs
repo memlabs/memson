@@ -74,7 +74,6 @@ fn parse_tern_cmd<F: Fn(Box<Cmd>, Box<Cmd>, Box<Cmd>) -> Cmd>(f: F, val: Json) -
             let z = parse_arg(arr.remove(2));
             let y = parse_arg(arr.remove(1));
             let x = parse_arg(arr.remove(0));
-            println!("{:?}\n{:?}\n{:?}", x, y, z);
             f(x, y, z)
         }
         val => Cmd::Val(val),
@@ -381,7 +380,6 @@ fn num_lt(x: &Number, y: &Number) -> bool {
         }
         (None, None) => x.as_f64().unwrap() < y.as_f64().unwrap()
     };
-    println!("x={:?}\ny={:?}\nr={:?}", x, y, val);
     val
 }
 
@@ -403,7 +401,6 @@ fn num_gt(x: &Number, y: &Number) -> bool {
 }
 
 pub fn lt(x: &Json, y: &Json) -> Json {
-    println!("{:?}\t{:?}", x, y);
     match (x,y) {
         (Json::Array(x), Json::Array(y)) => Json::Array(x.iter().zip(y.iter()).map(|(x,y)| lt(x,y)).collect()),
         (Json::Array(x), y) => Json::Array(x.iter().map(|e| lt(e, y)).collect()),
