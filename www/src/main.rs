@@ -21,14 +21,9 @@ impl DbState {
 
 #[post("/eval")]
 async fn eval(cmd: web::Json<Json>, db_state: web::Data<DbState>) -> impl Responder {
-    //println!("{:?}", cmd);
     let mut db = db_state.db.lock().unwrap();
     let cmd = Cmd::parse(cmd.into_inner());
     let val = db.eval(cmd);
-    // match val {
-    //     JsonVal::Val(val) => web::Json(&val),
-    //     JsonVal::Arc(val) =>  web::Json(val.as_ref()),
-    // }
     HttpResponse::build(StatusCode::OK).json(val.as_ref())
 }
 

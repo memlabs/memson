@@ -7,8 +7,6 @@ use serde_json::Number;
 use serde_json::json;
 use serde_json::Map;
 
-type Result<T> = std::result::Result<T, &'static str>;
-
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Cmd {
     #[serde(rename="+")]
@@ -18,11 +16,15 @@ pub enum Cmd {
     #[serde(rename="/")]
     Div(Box<Cmd>, Box<Cmd>),
     #[serde(rename="eval")]
-    Eval(Json),  
+    Eval(Json),
+    #[serde(rename="==")]
+    Eq(Box<Cmd>, Box<Cmd>),      
     #[serde(rename="first")]
     First(Box<Cmd>),            
     #[serde(rename="get")]
     Get(String),
+    #[serde(rename="if")]
+    If(Box<Cmd>, Box<Cmd>, Box<Cmd>),    
     #[serde(rename="key")]
     Key(String, Box<Cmd>),
     #[serde(rename="last")]    
@@ -34,7 +36,9 @@ pub enum Cmd {
     #[serde(rename="min")]
     Min(Box<Cmd>),
     #[serde(rename="*")]
-    Mul(Box<Cmd>, Box<Cmd>),    
+    Mul(Box<Cmd>, Box<Cmd>), 
+    #[serde(rename="!=")]
+    NotEq(Box<Cmd>, Box<Cmd>),        
     #[serde(rename="set")]
     Set(String, Box<Cmd>),
     #[serde(rename="-")]
@@ -57,6 +61,19 @@ fn parse_bin_cmd<F: Fn(Box<Cmd>, Box<Cmd>) -> Cmd>(f: F, val: Json) -> Cmd {
             let rhs = parse_arg(arr.remove(1));
             let lhs = parse_arg(arr.remove(0));
             f(lhs, rhs)
+        }
+        val => Cmd::Val(val),
+    }
+}
+
+fn parse_tern_cmd<F: Fn(Box<Cmd>, Box<Cmd>, Box<Cmd>) -> Cmd>(f: F, val: Json) -> Cmd {
+    match val {
+        Json::Array(mut arr) if arr.len() == 3 => {
+            let z = parse_arg(arr.remove(2));
+            let y = parse_arg(arr.remove(1));
+            let x = parse_arg(arr.remove(0));
+            println!("{:?}\n{:?}\n{:?}", x, y, z);
+            f(x, y, z)
         }
         val => Cmd::Val(val),
     }
@@ -107,11 +124,14 @@ impl Cmd {
                         "-" => parse_bin_cmd(Cmd::Sub, val),
                         "*" => parse_bin_cmd(Cmd::Mul, val),
                         "/" => parse_bin_cmd(Cmd::Div, val),
+                        "==" => parse_bin_cmd(Cmd::Eq, val),
+                        "!=" => parse_bin_cmd(Cmd::NotEq, val),
                         "avg" => parse_unr_cmd(Cmd::Avg, val),
                         "div" => parse_bin_cmd(Cmd::Div, val),
                         "eval" => Cmd::Eval(val),
                         "first" => parse_unr_cmd(Cmd::First, val),
                         "get" => parse_get(val),
+                        "if" => parse_tern_cmd(Cmd::If, val),
                         "key" => parse_key(val),
                         "last" => parse_unr_cmd(Cmd::Last, val),
                         "len" => parse_unr_cmd(Cmd::Len, val),
@@ -168,8 +188,10 @@ impl Db {
             Cmd::Avg(arg) => self.eval_unary_cmd(*arg, &avg),
             Cmd::Div(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &div),
             Cmd::Eval(arg) => self.eval_eval_cmd(arg),
+            Cmd::Eq(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &eq),
             Cmd::First(arg) => self.eval_unary_cmd(*arg, &first),
             Cmd::Get(key) => self.get_val(&key),
+            Cmd::If(pred, lhs, rhs) => self.eval_if(*pred, *lhs, *rhs),
             Cmd::Key(key, arg) => {
                 let val = self.eval(*arg);
                 JsonVal::Val(self.eval_key(&key, val.as_ref()))
@@ -179,6 +201,7 @@ impl Db {
             Cmd::Max(arg) => self.eval_unary_cmd(*arg, &max),
             Cmd::Min(arg) => self.eval_unary_cmd(*arg, &min),
             Cmd::Mul(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &mul),
+            Cmd::NotEq(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &not_eq),
             Cmd::Set(key, arg) => self.set_val(key, *arg),
             Cmd::Sub(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &sub),
             Cmd::Sum(arg) => self.eval_unary_cmd(*arg, &sum),
@@ -222,6 +245,13 @@ impl Db {
     fn eval_binary_cmd<F:Fn(&Json, &Json) -> Json>(&mut self, lhs: Cmd, rhs: Cmd, f: F) -> JsonVal {
         let (x, y)  = (self.eval(lhs), self.eval(rhs));
         JsonVal::Val(f(x.as_ref(), y.as_ref()))
+    }
+
+    fn eval_if(&mut self, pred: Cmd, lhs: Cmd, rhs: Cmd) -> JsonVal {
+        match self.eval(pred).as_ref() {
+            Json::Bool(true) => self.eval(lhs),
+            _ => self.eval(rhs),
+        }
     }
 }
 
@@ -311,8 +341,14 @@ pub fn avg(val: &Json) -> Json {
     }
 }
 
+pub fn eq(x: &Json, y: &Json) -> Json {
+    Json::Bool(x == y)
+}
 
 
+pub fn not_eq(x: &Json, y: &Json) -> Json {
+    Json::Bool(x != y)
+}
 
 pub fn first(val: &Json) -> Json {
     match val {
