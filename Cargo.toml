@@ -1,8 +1,9 @@
-[workspace]
+[package]
+name = "www"
+version = "0.1.0"
+edition = "2021"
 
-members = [
-    "db",
-    "www",
-    "cli",
-    "server"
-]
+[dependencies]
+serde = { version = "*", features=["derive"]}
+serde_json="*"
+actix-web="*"
