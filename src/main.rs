@@ -1,11 +1,11 @@
 // actix-web = "4"
-mod json;
+mod db;
 
 use actix_web::{HttpResponse};
 use actix_web::Responder;
 use std::sync::Mutex;
 use actix_web::{post, web, App, HttpServer};
-use json::{Cmd,Db, Json};
+use db::{Cmd, Db, Json};
 use actix_web::http::StatusCode;
 
 

@@ -1,4 +1,5 @@
 
+use std::cmp::{Ord, Ordering};
 use std::sync::Arc;
 use std::collections::BTreeMap;
 use serde::{Deserialize,Serialize};
@@ -12,7 +13,7 @@ pub enum Cmd {
     #[serde(rename="+")]
     Add(Box<Cmd>, Box<Cmd>),    
     #[serde(rename="avg")]
-    Avg(Box<Cmd>),
+    Avg(Box<Cmd>),   
     #[serde(rename="/")]
     Div(Box<Cmd>, Box<Cmd>),
     #[serde(rename="eval")]
@@ -21,8 +22,12 @@ pub enum Cmd {
     Eq(Box<Cmd>, Box<Cmd>),      
     #[serde(rename="first")]
     First(Box<Cmd>),            
+    #[serde(rename=">=")]
+    Ge(Box<Cmd>, Box<Cmd>),      
     #[serde(rename="get")]
     Get(String),
+    #[serde(rename=">")]
+    Gt(Box<Cmd>, Box<Cmd>),    
     #[serde(rename="if")]
     If(Box<Cmd>, Box<Cmd>, Box<Cmd>),    
     #[serde(rename="key")]
@@ -31,8 +36,10 @@ pub enum Cmd {
     Last(Box<Cmd>),  
     #[serde(rename="len")]    
     Len(Box<Cmd>),   
-    #[serde(rename="lt")]    
-    Lt(Box<Cmd>, Box<Cmd>),     
+    #[serde(rename="<=")]    
+    Le(Box<Cmd>, Box<Cmd>), 
+    #[serde(rename="<")]    
+    Lt(Box<Cmd>, Box<Cmd>), 
     #[serde(rename="max")]
     Max(Box<Cmd>),        
     #[serde(rename="min")]
@@ -40,7 +47,9 @@ pub enum Cmd {
     #[serde(rename="*")]
     Mul(Box<Cmd>, Box<Cmd>), 
     #[serde(rename="!=")]
-    NotEq(Box<Cmd>, Box<Cmd>),        
+    NotEq(Box<Cmd>, Box<Cmd>), 
+    #[serde(rename="unique")]
+    Unique(Box<Cmd>),            
     #[serde(rename="set")]
     Set(String, Box<Cmd>),
     #[serde(rename="-")]
@@ -128,6 +137,9 @@ impl Cmd {
                         "==" => parse_bin_cmd(Cmd::Eq, val),
                         "!=" => parse_bin_cmd(Cmd::NotEq, val),
                         "<" => parse_bin_cmd(Cmd::Lt, val),
+                        "<=" => parse_bin_cmd(Cmd::Le, val),
+                        ">" => parse_bin_cmd(Cmd::Gt, val),
+                        ">=" => parse_bin_cmd(Cmd::Ge, val),                        
                         "avg" => parse_unr_cmd(Cmd::Avg, val),
                         "div" => parse_bin_cmd(Cmd::Div, val),
                         "eval" => Cmd::Eval(val),
@@ -144,6 +156,7 @@ impl Cmd {
                         "sub" => parse_bin_cmd(Cmd::Sub, val),
                         "sum" => parse_unr_cmd(Cmd::Sum, val),
                         "sums" => parse_unr_cmd(Cmd::Sums, val),
+                        "unique" => parse_unr_cmd(Cmd::Unique, val),
                         "val" => Cmd::Val(val),
                         _ => Cmd::Val(json!({key: val}))
                     }
@@ -171,8 +184,23 @@ impl Db {
         self.data.get(key).cloned()
     }
 
-    fn get_val(&self, key: &str) -> JsonVal {
-        self.get(&key).map(JsonVal::Arc).unwrap_or(JsonVal::Val(Json::Null))
+    fn eval_get(&self, key: &str) -> JsonVal {
+        let keys: Vec<_> = key.split('.').collect();
+
+        match self.get(keys[0]) {
+            Some(val) => {
+                
+                println!("{:?}", keys);
+                if keys.len() > 1 {
+                    JsonVal::Val(gets(val.as_ref(), &keys[1..]))
+                } else {
+                    JsonVal::Arc(val.clone())
+                }
+                
+            }
+            None => JsonVal::Val(Json::Null)
+        }
+ 
     }
     
     fn set(&mut self, key: String, val: Arc<Json>) -> Option<Arc<Json>> {
@@ -186,29 +214,33 @@ impl Db {
 
     pub fn eval(&mut self, cmd: Cmd) -> JsonVal {
         match cmd {
-            Cmd::Add(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &add),
-            Cmd::Avg(arg) => self.eval_unary_cmd(*arg, &avg),
-            Cmd::Div(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &div),
+            Cmd::Add(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, add),
+            Cmd::Avg(arg) => self.eval_unary_cmd(*arg, avg),
+            Cmd::Div(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, div),
             Cmd::Eval(arg) => self.eval_eval_cmd(arg),
-            Cmd::Eq(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &eq),
+            Cmd::Eq(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, eq),
             Cmd::First(arg) => self.eval_unary_cmd(*arg, &first),
-            Cmd::Get(key) => self.get_val(&key),
+            Cmd::Ge(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, ge),
+            Cmd::Get(key) => self.eval_get(&key),
+            Cmd::Gt(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, gt),
             Cmd::If(pred, lhs, rhs) => self.eval_if(*pred, *lhs, *rhs),
             Cmd::Key(key, arg) => {
                 let val = self.eval(*arg);
                 JsonVal::Val(self.eval_key(&key, val.as_ref()))
             }
-            Cmd::Last(arg) => self.eval_unary_cmd(*arg, &last),
-            Cmd::Len(arg) => self.eval_unary_cmd(*arg, &len),
-            Cmd::Lt(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &lt),
-            Cmd::Max(arg) => self.eval_unary_cmd(*arg, &max),
-            Cmd::Min(arg) => self.eval_unary_cmd(*arg, &min),
-            Cmd::Mul(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &mul),
-            Cmd::NotEq(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &not_eq),
+            Cmd::Last(arg) => self.eval_unary_cmd(*arg, last),
+            Cmd::Len(arg) => self.eval_unary_cmd(*arg, len),
+            Cmd::Le(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, le),
+            Cmd::Lt(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, lt),
+            Cmd::Max(arg) => self.eval_unary_cmd(*arg, max),
+            Cmd::Min(arg) => self.eval_unary_cmd(*arg, min),
+            Cmd::Mul(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, mul),
+            Cmd::NotEq(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, not_eq),
             Cmd::Set(key, arg) => self.set_val(key, *arg),
-            Cmd::Sub(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &sub),
-            Cmd::Sum(arg) => self.eval_unary_cmd(*arg, &sum),
-            Cmd::Sums(arg) => self.eval_unary_cmd(*arg, &sums),
+            Cmd::Sub(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, sub),
+            Cmd::Sum(arg) => self.eval_unary_cmd(*arg, sum),
+            Cmd::Sums(arg) => self.eval_unary_cmd(*arg, sums),
+            Cmd::Unique(arg) => self.eval_unary_cmd(*arg, unique),
             Cmd::Val(val) => JsonVal::Val(val),
         }
     }
@@ -289,6 +321,28 @@ fn scalar_vec_op<F:Fn(&Json, &Json) -> Json>(lhs: &Json, rhs:&[Json], op: F) -> 
 //     }
 // }
 
+fn gets(val: &Json, keys: &[&str]) -> Json {
+    println!("get({:?}, {:?})", val, keys);
+    let mut i = 0;
+    let mut out = Json::Null;
+    let mut v = val;
+    while i < keys.len() {
+        let key = keys[i];
+        out = get(v, key);
+        v = &out;
+        i += 1;
+    }
+    out
+}
+
+fn get(val: &Json, key: &str) -> Json {
+    println!("{:?}\t{:?}", val, key);
+    match val {
+        Json::Array(arr) => Json::Array(arr.iter().map(|e| get(e, key)).collect()),
+        Json::Object(obj) => obj.get(key).cloned().unwrap_or(Json::Null),
+        _ => Json::Null,
+    }
+}
 
 pub fn add(x: &Json, y: &Json) -> Json {
     match (x, y) {
@@ -365,50 +419,65 @@ pub fn not_eq(x: &Json, y: &Json) -> Json {
 
 
 //TODO (make generic)
-fn num_lt(x: &Number, y: &Number) -> bool {
-    let val = match (x.as_i64(), y.as_i64()) {
-        (Some(x), Some(y)) => x < y,
-        (Some(x), None) => {
-            let lhs = x as f64;
-            let rhs = y.as_f64().unwrap();
-            lhs < rhs
-        }
-        (None, Some(y)) => {
-            let lhs = x.as_f64().unwrap();
-            let rhs = y as f64;
-            lhs < rhs
-        }
-        (None, None) => x.as_f64().unwrap() < y.as_f64().unwrap()
-    };
-    val
-}
-
-fn num_gt(x: &Number, y: &Number) -> bool {
+fn num_op<F:Fn(Ordering) -> bool>(x: &Number, y: &Number, f: F) -> bool {
     match (x.as_i64(), y.as_i64()) {
-        (Some(x), Some(y)) => x < y,
+        (Some(x), Some(y)) => f(x.cmp(&y)),
         (Some(x), None) => {
             let lhs = x as f64;
-            let rhs = y.as_f64().unwrap();
-            lhs > rhs
+            let rhs: f64 = y.as_f64().unwrap();
+            f(lhs.partial_cmp(&rhs).unwrap())
         }
         (None, Some(y)) => {
             let lhs = x.as_f64().unwrap();
             let rhs = y as f64;
-            lhs > rhs
+            f(lhs.partial_cmp(&rhs).unwrap())
         }
-        (None, None) => x.as_f64().unwrap() > y.as_f64().unwrap()
+        (None, None) => f(x.as_f64().unwrap().partial_cmp(&y.as_f64().unwrap()).unwrap())
     }
 }
 
-pub fn lt(x: &Json, y: &Json) -> Json {
+
+fn is_lt(o: Ordering) -> bool {
+    o.is_lt()
+}
+
+fn is_le(o: Ordering) -> bool {
+    o.is_le()
+}
+
+fn is_ge(o: Ordering) -> bool {
+    o.is_ge()
+}
+
+fn is_gt(o: Ordering) -> bool {
+    o.is_gt()
+}
+
+fn cmp<F:Fn(&Json, &Json) -> Json, G:Fn(Ordering) -> bool>(x: &Json, y: &Json, f: F, g: G) -> Json {
     match (x,y) {
-        (Json::Array(x), Json::Array(y)) => Json::Array(x.iter().zip(y.iter()).map(|(x,y)| lt(x,y)).collect()),
-        (Json::Array(x), y) => Json::Array(x.iter().map(|e| lt(e, y)).collect()),
-        (x, Json::Array(y)) => Json::Array(y.iter().map(|e| lt(x, e)).collect()),
-        (Json::String(x), Json::String(y)) => Json::Bool(x < y),
-        (Json::Number(x), Json::Number(y)) => Json::Bool(num_lt(x, y)),
+        (Json::Array(x), Json::Array(y)) => Json::Array(x.iter().zip(y.iter()).map(|(x,y)| f(x,y)).collect()),
+        (Json::Array(x), y) => Json::Array(x.iter().map(|e| f(e, y)).collect()),
+        (x, Json::Array(y)) => Json::Array(y.iter().map(|e| f(x, e)).collect()),
+        (Json::String(x), Json::String(y)) => Json::Bool(g(x.cmp(y))),
+        (Json::Number(x), Json::Number(y)) => Json::Bool(num_op(x, y, g)),
         _ => unimplemented!()
-    }
+    }    
+}
+
+fn lt(x: &Json, y: &Json) -> Json {
+    cmp(x, y, lt, is_lt)
+}
+
+fn le(x: &Json, y: &Json) -> Json {
+    cmp(x, y, le, is_le)
+}
+
+fn ge(x: &Json, y: &Json) -> Json {
+    cmp(x, y, ge, is_ge)
+}
+
+fn gt(x: &Json, y: &Json) -> Json {
+    cmp(x, y, gt, is_gt)
 }
 
 pub fn first(val: &Json) -> Json {
@@ -471,7 +540,7 @@ fn sum_arr(arr: &[Json]) -> Json {
     sum
 }
 
-pub fn sum(val: &Json) -> Json {
+fn sum(val: &Json) -> Json {
     match val {
         Json::Array(arr) => sum_arr(arr),
         Json::Number(val) => Json::from(val.clone()),
@@ -485,7 +554,7 @@ fn reduce_sum((mut vec, sum): (Vec<Json>, Json), e: &Json) -> (Vec<Json>, Json) 
     (vec, total)
 }
 
-pub fn sums(val: &Json) -> Json {
+fn sums(val: &Json) -> Json {
     match val {
         Json::Array(arr) =>  {
             let (v, _) = arr.iter().fold((Vec::new(), Json::from(0i64)), reduce_sum);
@@ -496,11 +565,26 @@ pub fn sums(val: &Json) -> Json {
     }
 }
 
-pub fn json_key(k: &str, val: &Json) -> Json {
+fn json_key(k: &str, val: &Json) -> Json {
     match val {
         Json::Array(arr) => Json::Array(arr.iter().map(|e| json_key(k, e)).collect()),
         Json::Object(obj) => obj.get(k).cloned().unwrap_or(Json::Null),
         _ => Json::Null,
+    }
+}
+
+fn unique(val: &Json) -> Json {
+    match val {
+        Json::Array(arr) => {
+            let mut set = Vec::new();
+            for val in arr {
+                if !set.contains(val) {
+                    set.push(val.clone());
+                }
+            }
+            Json::Array(set)
+        }
+        val => val.clone(),
     }
 }
 
