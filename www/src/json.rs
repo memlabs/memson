@@ -30,7 +30,9 @@ pub enum Cmd {
     #[serde(rename="last")]    
     Last(Box<Cmd>),  
     #[serde(rename="len")]    
-    Len(Box<Cmd>),      
+    Len(Box<Cmd>),   
+    #[serde(rename="lt")]    
+    Lt(Box<Cmd>, Box<Cmd>),     
     #[serde(rename="max")]
     Max(Box<Cmd>),        
     #[serde(rename="min")]
@@ -126,6 +128,7 @@ impl Cmd {
                         "/" => parse_bin_cmd(Cmd::Div, val),
                         "==" => parse_bin_cmd(Cmd::Eq, val),
                         "!=" => parse_bin_cmd(Cmd::NotEq, val),
+                        "<" => parse_bin_cmd(Cmd::Lt, val),
                         "avg" => parse_unr_cmd(Cmd::Avg, val),
                         "div" => parse_bin_cmd(Cmd::Div, val),
                         "eval" => Cmd::Eval(val),
@@ -198,6 +201,7 @@ impl Db {
             }
             Cmd::Last(arg) => self.eval_unary_cmd(*arg, &last),
             Cmd::Len(arg) => self.eval_unary_cmd(*arg, &len),
+            Cmd::Lt(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &lt),
             Cmd::Max(arg) => self.eval_unary_cmd(*arg, &max),
             Cmd::Min(arg) => self.eval_unary_cmd(*arg, &min),
             Cmd::Mul(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &mul),
@@ -342,12 +346,72 @@ pub fn avg(val: &Json) -> Json {
 }
 
 pub fn eq(x: &Json, y: &Json) -> Json {
-    Json::Bool(x == y)
+    match (x,y) {
+        (Json::Array(x), Json::Array(y)) => Json::Array(x.iter().zip(y.iter()).map(|(x,y)| eq(x,y)).collect()),
+        (Json::Array(x), y) => Json::Array(x.iter().map(|x| eq(x, y)).collect()),
+        (x, Json::Array(y)) => Json::Array(y.iter().map(|y| eq(x, y)).collect()),
+        (x, y) => Json::Bool(x == y)
+    }
 }
 
 
 pub fn not_eq(x: &Json, y: &Json) -> Json {
-    Json::Bool(x != y)
+    match (x,y) {
+        (Json::Array(x), Json::Array(y)) => Json::Array(x.iter().zip(y.iter()).map(|(x,y)| not_eq(x,y)).collect()),
+        (Json::Array(x), y) => Json::Array(x.iter().map(|x| not_eq(x, y)).collect()),
+        (x, Json::Array(y)) => Json::Array(y.iter().map(|y| not_eq(x, y)).collect()),
+        (x, y) => Json::Bool(x != y)
+    }
+}
+
+
+//TODO (make generic)
+fn num_lt(x: &Number, y: &Number) -> bool {
+    let val = match (x.as_i64(), y.as_i64()) {
+        (Some(x), Some(y)) => x < y,
+        (Some(x), None) => {
+            let lhs = x as f64;
+            let rhs = y.as_f64().unwrap();
+            lhs < rhs
+        }
+        (None, Some(y)) => {
+            let lhs = x.as_f64().unwrap();
+            let rhs = y as f64;
+            lhs < rhs
+        }
+        (None, None) => x.as_f64().unwrap() < y.as_f64().unwrap()
+    };
+    println!("x={:?}\ny={:?}\nr={:?}", x, y, val);
+    val
+}
+
+fn num_gt(x: &Number, y: &Number) -> bool {
+    match (x.as_i64(), y.as_i64()) {
+        (Some(x), Some(y)) => x < y,
+        (Some(x), None) => {
+            let lhs = x as f64;
+            let rhs = y.as_f64().unwrap();
+            lhs > rhs
+        }
+        (None, Some(y)) => {
+            let lhs = x.as_f64().unwrap();
+            let rhs = y as f64;
+            lhs > rhs
+        }
+        (None, None) => x.as_f64().unwrap() > y.as_f64().unwrap()
+    }
+}
+
+pub fn lt(x: &Json, y: &Json) -> Json {
+    println!("{:?}\t{:?}", x, y);
+    match (x,y) {
+        (Json::Array(x), Json::Array(y)) => Json::Array(x.iter().zip(y.iter()).map(|(x,y)| lt(x,y)).collect()),
+        (Json::Array(x), y) => Json::Array(x.iter().map(|e| lt(e, y)).collect()),
+        (x, Json::Array(y)) => Json::Array(y.iter().map(|e| lt(x, e)).collect()),
+        (Json::String(x), Json::String(y)) => Json::Bool(x < y),
+        (Json::Number(x), Json::Number(y)) => Json::Bool(num_lt(x, y)),
+        _ => unimplemented!()
+    }
 }
 
 pub fn first(val: &Json) -> Json {
