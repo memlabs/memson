@@ -1,8 +1,9 @@
 use futures::prelude::*;
-use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio_serde::formats::*;
 use tokio_util::codec::{FramedRead, LengthDelimitedCodec};
+use bson::Bson;
+use serde_json::Value;
 
 #[tokio::main]
 pub async fn main() {
@@ -20,7 +21,7 @@ pub async fn main() {
         // Deserialize frames
         let mut deserialized = tokio_serde::SymmetricallyFramed::new(
             length_delimited,
-            SymmetricalJson::<Value>::default(),
+            SymmetricalBincode::<Value>::default(),
         );
 
         // Spawn a task that prints all received messages to STDOUT

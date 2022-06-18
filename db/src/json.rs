@@ -1,5 +1,4 @@
 use crate::Json;
-use serde_json::{Number};
 
 
 fn scalars_op<F:Fn(i64, i64) -> i64, G:Fn(f64, f64) -> f64>(x: &Number, y: &Number, f: F, g: G) -> Json {
@@ -30,8 +29,8 @@ pub fn add(x: &Json, y: &Json) -> Json {
         (Json::Array(x), y) => vec_scalar_op(x, y, &add),
         (x, Json::Array(y)) => scalar_vec_op(x, y, &add),
         (Json::String(x), Json::String(y)) => Json::String(x.clone() + y),
-        (Json::String(x), y) => Json::String(x.clone() + &y.to_string()),
-        (x, Json::String(y)) => Json::String(x.to_string() + &y),
+        (Json::String(x), y) => unimplemented!(),
+        (x, Json::String(y)) => unimplemented!(),
         _ => unimplemented!()
     }
 }

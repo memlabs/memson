@@ -8,4 +8,5 @@ tokio = { version = "*", features = ["full"] }
 futures = "*"
 serde_json = "*"
 tokio-util = { version = "*", features=["codec"]}
-tokio-serde = { version = "*", features=["json"]}
+tokio-serde = { version = "*", features=["bincode"]}
+bson = "*"

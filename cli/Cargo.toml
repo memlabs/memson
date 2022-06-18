@@ -9,3 +9,4 @@ futures = "*"
 serde_json = "*"
 tokio-util = { version = "*", features=["codec"]}
 tokio-serde = { version = "*", features=["json"]}
+bson = "*"

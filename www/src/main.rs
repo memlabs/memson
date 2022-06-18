@@ -1,13 +1,12 @@
 // actix-web = "4"
-extern crate db;
+mod json;
 
+use actix_web::{HttpResponse};
 use actix_web::Responder;
-use std::sync::Arc;
 use std::sync::Mutex;
 use actix_web::{post, web, App, HttpServer};
-use db::{Cmd,Db};
-
-
+use json::{Cmd,Db, JsonVal, Json};
+use actix_web::http::StatusCode;
 
 
 struct DbState {
@@ -21,14 +20,16 @@ impl DbState {
 }
 
 #[post("/eval")]
-async fn eval(cmd: web::Json<Cmd>, db_state: web::Data<DbState>) -> impl Responder {
+async fn eval(cmd: web::Json<Json>, db_state: web::Data<DbState>) -> impl Responder {
     println!("{:?}", cmd);
     let mut db = db_state.db.lock().unwrap();
-    match db.eval(cmd.into_inner()) {
-        Ok(JsonVal::Val(val)) => web::Json(val),
-        Ok(JsonVal::Arc(val)) =>  web::Json(val.as_ref().clone()),
-        _ => unimplemented!()
-    }
+    let cmd = Cmd::parse(cmd.into_inner());
+    let val = db.eval(cmd).unwrap();
+    // match val {
+    //     JsonVal::Val(val) => web::Json(&val),
+    //     JsonVal::Arc(val) =>  web::Json(val.as_ref()),
+    // }
+    HttpResponse::build(StatusCode::OK).json(val.as_ref())
 }
 
 #[actix_web::main]

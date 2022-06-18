@@ -1,8 +1,9 @@
 use futures::prelude::*;
-use serde_json::json;
+use bson::{Bson, Document};
 use tokio::net::TcpStream;
 use tokio_serde::formats::*;
 use tokio_util::codec::{FramedWrite, LengthDelimitedCodec};
+use serde_json::Value;
 
 #[tokio::main]
 pub async fn main() {
@@ -14,11 +15,14 @@ pub async fn main() {
 
     // Serialize frames with JSON
     let mut serialized =
-        tokio_serde::SymmetricallyFramed::new(length_delimited, SymmetricalJson::default());
+        tokio_serde::SymmetricallyFramed::new(length_delimited,  SymmetricalBincode::<Value>::default());
+
+    let mut doc = Document::new();
+    doc.insert("a", Bson::Int32(1));
 
     // Send the value
     serialized
-        .send(json!(vec![1;2_000_000]))
+        .send(Value::from(2))
         .await
         .unwrap()
 }
