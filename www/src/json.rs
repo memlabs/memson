@@ -5,6 +5,7 @@ use serde::{Deserialize,Serialize};
 pub use serde_json::Value as Json; 
 use serde_json::Number;
 use serde_json::json;
+use serde_json::Map;
 
 type Result<T> = std::result::Result<T, &'static str>;
 
@@ -17,7 +18,7 @@ pub enum Cmd {
     #[serde(rename="/")]
     Div(Box<Cmd>, Box<Cmd>),
     #[serde(rename="eval")]
-    Eval(Box<Cmd>),  
+    Eval(Json),  
     #[serde(rename="first")]
     First(Box<Cmd>),            
     #[serde(rename="get")]
@@ -108,6 +109,7 @@ impl Cmd {
                         "/" => parse_bin_cmd(Cmd::Div, val),
                         "avg" => parse_unr_cmd(Cmd::Avg, val),
                         "div" => parse_bin_cmd(Cmd::Div, val),
+                        "eval" => Cmd::Eval(val),
                         "first" => parse_unr_cmd(Cmd::First, val),
                         "get" => parse_get(val),
                         "key" => parse_key(val),
@@ -147,30 +149,30 @@ impl Db {
         self.data.get(key).cloned()
     }
 
-    fn get_val(&self, key: &str) -> Result<JsonVal> {
-        Ok(self.get(&key).map(JsonVal::Arc).unwrap_or(JsonVal::Val(Json::Null)))
+    fn get_val(&self, key: &str) -> JsonVal {
+        self.get(&key).map(JsonVal::Arc).unwrap_or(JsonVal::Val(Json::Null))
     }
     
     fn set(&mut self, key: String, val: Arc<Json>) -> Option<Arc<Json>> {
         self.data.insert(key, val)
     }
 
-    fn set_val(&mut self, key: String, arg: Cmd) -> Result<JsonVal> {
-        let val = self.eval(arg)?;
-        let old_val = self.set(key, val.to_arc()).map(JsonVal::Arc);
-        Ok(old_val.unwrap_or(JsonVal::Val(Json::Null)))
+    fn set_val(&mut self, key: String, arg: Cmd) -> JsonVal {
+        let val = self.eval(arg);
+        self.set(key, val.to_arc()).map(JsonVal::Arc).unwrap_or(JsonVal::Arc(Arc::new(Json::Null)))
     }    
 
-    pub fn eval(&mut self, cmd: Cmd) -> Result<JsonVal> {
+    pub fn eval(&mut self, cmd: Cmd) -> JsonVal {
         match cmd {
             Cmd::Add(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &add),
             Cmd::Avg(arg) => self.eval_unary_cmd(*arg, &avg),
             Cmd::Div(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &div),
+            Cmd::Eval(arg) => self.eval_eval_cmd(arg),
             Cmd::First(arg) => self.eval_unary_cmd(*arg, &first),
             Cmd::Get(key) => self.get_val(&key),
             Cmd::Key(key, arg) => {
-                let val = self.eval(*arg)?;
-                Ok(JsonVal::Val(self.eval_key(&key, val.as_ref())))
+                let val = self.eval(*arg);
+                JsonVal::Val(self.eval_key(&key, val.as_ref()))
             }
             Cmd::Last(arg) => self.eval_unary_cmd(*arg, &last),
             Cmd::Len(arg) => self.eval_unary_cmd(*arg, &len),
@@ -181,7 +183,7 @@ impl Db {
             Cmd::Sub(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, &sub),
             Cmd::Sum(arg) => self.eval_unary_cmd(*arg, &sum),
             Cmd::Sums(arg) => self.eval_unary_cmd(*arg, &sums),
-            Cmd::Val(val) => Ok(JsonVal::Val(val)),
+            Cmd::Val(val) => JsonVal::Val(val),
         }
     }
 
@@ -189,14 +191,37 @@ impl Db {
         json_key(key, val)
     }
 
-    fn eval_unary_cmd<F:Fn(&Json) -> Json>(&mut self, arg: Cmd, f: F) -> Result<JsonVal> {
-        let val = self.eval(arg)?;
-        Ok(JsonVal::Val(f(val.as_ref())))
+    fn eval_eval_cmd(&mut self, arg: Json) -> JsonVal {
+        match arg {
+            Json::Array(arr) => {
+                let mut out = Vec::with_capacity(arr.len());
+                for e in arr {
+                    let cmd = Cmd::parse(e);
+                    let val = self.eval(cmd).to_json();
+                    out.push(val);
+                }
+                JsonVal::Val(Json::Array(out))
+            }
+            Json::Object(obj) => {
+                let mut out = Map::new();
+                for (key, val) in obj {
+                    let cmd = Cmd::parse(val);
+                    out.insert(key, self.eval(cmd).to_json());
+                }
+                JsonVal::Val(Json::Object(out))
+            }
+            val => JsonVal::Val(val)  
+        }
     }
 
-    fn eval_binary_cmd<F:Fn(&Json, &Json) -> Json>(&mut self, lhs: Cmd, rhs: Cmd, f: F) -> Result<JsonVal> {
-        let (x, y)  = (self.eval(lhs)?, self.eval(rhs)?);
-        Ok(JsonVal::Val(f(x.as_ref(), y.as_ref())))
+    fn eval_unary_cmd<F:Fn(&Json) -> Json>(&mut self, arg: Cmd, f: F) -> JsonVal {
+        let val = self.eval(arg);
+        JsonVal::Val(f(val.as_ref()))
+    }
+
+    fn eval_binary_cmd<F:Fn(&Json, &Json) -> Json>(&mut self, lhs: Cmd, rhs: Cmd, f: F) -> JsonVal {
+        let (x, y)  = (self.eval(lhs), self.eval(rhs));
+        JsonVal::Val(f(x.as_ref(), y.as_ref()))
     }
 }
 
@@ -222,14 +247,14 @@ fn scalar_vec_op<F:Fn(&Json, &Json) -> Json>(lhs: &Json, rhs:&[Json], op: F) -> 
 } 
 
 
-fn vec_op<F:Fn(&Json, &Json) -> Json>(x: &Json, y: &Json, op: F) -> Json {
-    match (x, y) {
-        (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, op),
-        (Json::Array(x), y) => vec_scalar_op(x, y, op),
-        (x, Json::Array(y)) => scalar_vec_op(x, y, op),
-        (x, y) => op(x, y)
-    }
-}
+// fn vec_op<F:Fn(&Json, &Json) -> Json>(x: &Json, y: &Json, op: F) -> Json {
+//     match (x, y) {
+//         (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, op),
+//         (Json::Array(x), y) => vec_scalar_op(x, y, op),
+//         (x, Json::Array(y)) => scalar_vec_op(x, y, op),
+//         (x, y) => op(x, y)
+//     }
+// }
 
 
 pub fn add(x: &Json, y: &Json) -> Json {
@@ -285,6 +310,8 @@ pub fn avg(val: &Json) -> Json {
         _ => unimplemented!()
     }
 }
+
+
 
 
 pub fn first(val: &Json) -> Json {
@@ -433,6 +460,13 @@ impl JsonVal {
         match self {
             JsonVal::Val(val) => Arc::new(val),
             JsonVal::Arc(val) => val.clone(),
+        }
+    }
+
+    pub fn to_json(self) -> Json {
+        match self {
+            JsonVal::Arc(val) => val.as_ref().clone(),
+            JsonVal::Val(val) => val,
         }
     }
 }

@@ -5,7 +5,7 @@ use actix_web::{HttpResponse};
 use actix_web::Responder;
 use std::sync::Mutex;
 use actix_web::{post, web, App, HttpServer};
-use json::{Cmd,Db, JsonVal, Json};
+use json::{Cmd,Db, Json};
 use actix_web::http::StatusCode;
 
 
@@ -21,10 +21,10 @@ impl DbState {
 
 #[post("/eval")]
 async fn eval(cmd: web::Json<Json>, db_state: web::Data<DbState>) -> impl Responder {
-    println!("{:?}", cmd);
+    //println!("{:?}", cmd);
     let mut db = db_state.db.lock().unwrap();
     let cmd = Cmd::parse(cmd.into_inner());
-    let val = db.eval(cmd).unwrap();
+    let val = db.eval(cmd);
     // match val {
     //     JsonVal::Val(val) => web::Json(&val),
     //     JsonVal::Arc(val) =>  web::Json(val.as_ref()),
