@@ -260,13 +260,9 @@ impl Db {
                 }
                 JsonVal::Val(Json::Array(out))
             }
-            Json::Object(obj) => {
-                let mut out = Map::new();
-                for (key, val) in obj {
-                    let cmd = Cmd::parse(val);
-                    out.insert(key, self.eval(cmd).to_json());
-                }
-                JsonVal::Val(Json::Object(out))
+            obj@Json::Object(_) => {
+                let cmd = Cmd::parse(obj);
+                self.eval(cmd)
             }
             val => JsonVal::Val(val)  
         }
