@@ -6,7 +6,6 @@ use serde::{Deserialize,Serialize};
 pub use serde_json::Value as Json; 
 use serde_json::Number;
 use serde_json::json;
-use serde_json::Map;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Cmd {
@@ -217,7 +216,7 @@ impl Db {
             Cmd::Add(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, add),
             Cmd::Avg(arg) => self.eval_unary_cmd(*arg, avg),
             Cmd::Div(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, div),
-            Cmd::Eval(arg) => self.eval_eval_cmd(arg),
+            Cmd::Eval(arg) => self.eval_eval(arg),
             Cmd::Eq(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, eq),
             Cmd::First(arg) => self.eval_unary_cmd(*arg, &first),
             Cmd::Ge(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, ge),
@@ -249,23 +248,10 @@ impl Db {
         json_key(key, val)
     }
 
-    fn eval_eval_cmd(&mut self, arg: Json) -> JsonVal {
-        match arg {
-            Json::Array(arr) => {
-                let mut out = Vec::with_capacity(arr.len());
-                for e in arr {
-                    let cmd = Cmd::parse(e);
-                    let val = self.eval(cmd).to_json();
-                    out.push(val);
-                }
-                JsonVal::Val(Json::Array(out))
-            }
-            obj@Json::Object(_) => {
-                let cmd = Cmd::parse(obj);
-                self.eval(cmd)
-            }
-            val => JsonVal::Val(val)  
-        }
+    fn eval_eval(&mut self, arg: Json) -> JsonVal {
+        let val = self.eval(Cmd::parse(arg));
+        let cmd = Cmd::parse(val.to_json());
+        self.eval(cmd)
     }
 
     fn eval_unary_cmd<F:Fn(&Json) -> Json>(&mut self, arg: Cmd, f: F) -> JsonVal {
