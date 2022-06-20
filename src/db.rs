@@ -72,6 +72,7 @@ impl Cmd {
             let y = Box::new(rhs.eval(docs));
             f(x, y) 
         }
+        println!("{:?}", self);
         match self {
             Cmd::Eq(lhs, rhs) => bin_f(Cmd::Eq, *lhs, *rhs, docs),
             Cmd::NotEq(lhs, rhs) => bin_f(Cmd::NotEq, *lhs, *rhs, docs),
