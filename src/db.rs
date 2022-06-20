@@ -72,7 +72,6 @@ impl Cmd {
             let y = Box::new(rhs.eval(docs));
             f(x, y) 
         }
-        println!("{:?}", self);
         match self {
             Cmd::Eq(lhs, rhs) => bin_f(Cmd::Eq, *lhs, *rhs, docs),
             Cmd::NotEq(lhs, rhs) => bin_f(Cmd::NotEq, *lhs, *rhs, docs),
@@ -145,7 +144,7 @@ pub struct Query {
     from: Cmd,
     by: Option<Vec<Json>>,
     #[serde(rename="where")]
-    filter: Option<Cmd>
+    filters: Option<Cmd>
 }
 
 impl Query {
@@ -153,8 +152,8 @@ impl Query {
         match val {
             Json::Object(obj) => {
                 let from = Cmd::parse(obj.get("from").cloned().unwrap());
-                let filter = obj.get("where").cloned().map(Cmd::parse);
-                Query{ select: None, from, by: None, filter }
+                let filters = obj.get("where").cloned().map(Cmd::parse);
+                Query{ select: None, from, by: None, filters }
             }
             _ => unimplemented!(),
         }
@@ -178,7 +177,7 @@ impl Query {
     }
 
     fn eval_where(&self, db: &mut Db, docs: Vec<Json>) -> Vec<Json> {
-        if let Some(filter) = self.filter.clone() {
+        if let Some(filter) = self.filters.clone() {
             let cmd = filter.eval(&docs);
             match db.eval(cmd) {
                 JsonVal::Val(Json::Array(flags)) => {
@@ -395,7 +394,6 @@ fn scalar_vec_op<F:Fn(&Json, &Json) -> Json>(lhs: &Json, rhs:&[Json], op: F) -> 
 // }
 
 fn gets(val: &Json, keys: &[&str]) -> Json {
-    println!("get({:?}, {:?})", val, keys);
     let mut i = 0;
     let mut out = Json::Null;
     let mut v = val;
@@ -409,7 +407,6 @@ fn gets(val: &Json, keys: &[&str]) -> Json {
 }
 
 fn get(val: &Json, key: &str) -> Json {
-    println!("{:?}\t{:?}", val, key);
     match val {
         Json::Array(arr) => Json::Array(arr.iter().map(|e| get(e, key)).collect()),
         Json::Object(obj) => obj.get(key).cloned().unwrap_or(Json::Null),
