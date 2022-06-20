@@ -7,7 +7,8 @@ pub use serde_json::Value as Json;
 use serde_json::Number;
 use serde_json::json;
 
-#[derive(Debug, Serialize, Deserialize)]
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Cmd {
     #[serde(rename="+")]
     Add(Box<Cmd>, Box<Cmd>),    
@@ -56,9 +57,145 @@ pub enum Cmd {
     #[serde(rename="sum")]
     Sum(Box<Cmd>),
     #[serde(rename="sums")]
-    Sums(Box<Cmd>),   
+    Sums(Box<Cmd>),      
+    #[serde(rename="sql")]
+    Sql(Box<Query>),
     #[serde(rename="val")]
     Val(Json),
+}
+
+impl Cmd {
+
+    fn eval(self, docs: &[Json]) -> Cmd {
+        fn bin_f<F:Fn(Box<Cmd>, Box<Cmd>) -> Cmd>(f: F,lhs: Cmd, rhs: Cmd, docs: &[Json]) -> Cmd { 
+            let x = Box::new(lhs.eval(docs));
+            let y = Box::new(rhs.eval(docs));
+            f(x, y) 
+        }
+        println!("{:?}", self);
+        match self {
+            Cmd::Eq(lhs, rhs) => bin_f(Cmd::Eq, *lhs, *rhs, docs),
+            Cmd::NotEq(lhs, rhs) => bin_f(Cmd::NotEq, *lhs, *rhs, docs),
+            Cmd::Val(Json::String(val)) => {
+                if val.starts_with('$') {
+                    let key = &val[1..];
+                    let val = docs.iter().map(|doc| doc.get(key).cloned().unwrap_or(Json::Null)).collect();
+                    Cmd::Val(Json::Array(val))
+                    
+                } else {
+                    Cmd::Val(Json::String(val))
+                }
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn parse(val: Json) -> Cmd {
+        match val {
+            Json::Object(obj) => {
+                if obj.len() == 1 {
+                    let mut it = obj.into_iter();
+                    let (key, val) = it.next().unwrap();
+                    match key.as_str() {
+                        "+" => parse_bin_cmd(Cmd::Add, val),
+                        "-" => parse_bin_cmd(Cmd::Sub, val),
+                        "*" => parse_bin_cmd(Cmd::Mul, val),
+                        "/" => parse_bin_cmd(Cmd::Div, val),
+                        "==" => parse_bin_cmd(Cmd::Eq, val),
+                        "!=" => parse_bin_cmd(Cmd::NotEq, val),
+                        "<" => parse_bin_cmd(Cmd::Lt, val),
+                        "<=" => parse_bin_cmd(Cmd::Le, val),
+                        ">" => parse_bin_cmd(Cmd::Gt, val),
+                        ">=" => parse_bin_cmd(Cmd::Ge, val),                        
+                        "avg" => parse_unr_cmd(Cmd::Avg, val),
+                        "div" => parse_bin_cmd(Cmd::Div, val),
+                        "eval" => Cmd::Eval(val),
+                        "first" => parse_unr_cmd(Cmd::First, val),
+                        "get" => parse_get(val),
+                        "if" => parse_tern_cmd(Cmd::If, val),
+                        "key" => parse_key(val),
+                        "last" => parse_unr_cmd(Cmd::Last, val),
+                        "len" => parse_unr_cmd(Cmd::Len, val),
+                        "max" => parse_unr_cmd(Cmd::Max, val),
+                        "min" => parse_unr_cmd(Cmd::Min, val),
+                        "mul" => parse_bin_cmd(Cmd::Mul, val),
+                        "set" => parse_set(val),
+                        "sub" => parse_bin_cmd(Cmd::Sub, val),
+                        "sum" => parse_unr_cmd(Cmd::Sum, val),
+                        "sums" => parse_unr_cmd(Cmd::Sums, val),
+                        "sql" => Cmd::Sql(Box::new(Query::parse(val))),
+                        "unique" => parse_unr_cmd(Cmd::Unique, val),
+                        "val" => Cmd::Val(val),
+                        _ => Cmd::Val(json!({key: val}))
+                    }
+                } else {
+                    Cmd::Val(Json::Object(obj))
+                }
+            }
+            val => Cmd::Val(val),
+        }
+    }
+}
+
+
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Query {
+    select: Option<Vec<Json>>,
+    from: Cmd,
+    by: Option<Vec<Json>>,
+    #[serde(rename="where")]
+    filter: Option<Cmd>
+}
+
+impl Query {
+    fn parse(val: Json) -> Query {
+        match val {
+            Json::Object(obj) => {
+                let from = Cmd::parse(obj.get("from").cloned().unwrap());
+                let filter = obj.get("where").cloned().map(Cmd::parse);
+                Query{ select: None, from, by: None, filter }
+            }
+            _ => unimplemented!(),
+        }
+    }
+    
+    fn eval(&self, db: &mut Db) -> Json {
+        // evaluate from
+        let docs = self.eval_from(db);
+        // filter docs
+        let docs = self.eval_where(db, docs);
+
+        Json::Array(docs)
+    }
+
+    fn eval_from(&self, db: &mut Db) -> Vec<Json> {
+        let val = db.eval(self.from.clone());
+        match val.to_json() {
+            Json::Array(arr) => arr,
+            _ => unimplemented!(),
+        }
+    }
+
+    fn eval_where(&self, db: &mut Db, docs: Vec<Json>) -> Vec<Json> {
+        if let Some(filter) = self.filter.clone() {
+            let cmd = filter.eval(&docs);
+            match db.eval(cmd) {
+                JsonVal::Val(Json::Array(flags)) => {
+                    let mut out = Vec::new();
+                    for (flag, doc) in flags.iter().zip(docs.into_iter()) {
+                        if flag.as_bool().unwrap_or(false) {
+                            out.push(doc);
+                        }
+                    }
+                    out
+                }
+                _ => unimplemented!(),
+            }
+        } else {
+            docs
+        }
+    }
 }
 
 fn parse_unr_cmd<F: Fn(Box<Cmd>) -> Cmd>(f: F, arg: Json) -> Cmd {
@@ -119,53 +256,6 @@ fn parse_key(val: Json) -> Cmd {
 
 fn parse_set(val: Json) -> Cmd {
     parse_op(Cmd::Set, val)
-}
-
-impl Cmd {
-    pub fn parse(val: Json) -> Cmd {
-        match val {
-            Json::Object(obj) => {
-                if obj.len() == 1 {
-                    let mut it = obj.into_iter();
-                    let (key, val) = it.next().unwrap();
-                    match key.as_str() {
-                        "+" => parse_bin_cmd(Cmd::Add, val),
-                        "-" => parse_bin_cmd(Cmd::Sub, val),
-                        "*" => parse_bin_cmd(Cmd::Mul, val),
-                        "/" => parse_bin_cmd(Cmd::Div, val),
-                        "==" => parse_bin_cmd(Cmd::Eq, val),
-                        "!=" => parse_bin_cmd(Cmd::NotEq, val),
-                        "<" => parse_bin_cmd(Cmd::Lt, val),
-                        "<=" => parse_bin_cmd(Cmd::Le, val),
-                        ">" => parse_bin_cmd(Cmd::Gt, val),
-                        ">=" => parse_bin_cmd(Cmd::Ge, val),                        
-                        "avg" => parse_unr_cmd(Cmd::Avg, val),
-                        "div" => parse_bin_cmd(Cmd::Div, val),
-                        "eval" => Cmd::Eval(val),
-                        "first" => parse_unr_cmd(Cmd::First, val),
-                        "get" => parse_get(val),
-                        "if" => parse_tern_cmd(Cmd::If, val),
-                        "key" => parse_key(val),
-                        "last" => parse_unr_cmd(Cmd::Last, val),
-                        "len" => parse_unr_cmd(Cmd::Len, val),
-                        "max" => parse_unr_cmd(Cmd::Max, val),
-                        "min" => parse_unr_cmd(Cmd::Min, val),
-                        "mul" => parse_bin_cmd(Cmd::Mul, val),
-                        "set" => parse_set(val),
-                        "sub" => parse_bin_cmd(Cmd::Sub, val),
-                        "sum" => parse_unr_cmd(Cmd::Sum, val),
-                        "sums" => parse_unr_cmd(Cmd::Sums, val),
-                        "unique" => parse_unr_cmd(Cmd::Unique, val),
-                        "val" => Cmd::Val(val),
-                        _ => Cmd::Val(json!({key: val}))
-                    }
-                } else {
-                    Cmd::Val(Json::Object(obj))
-                }
-            }
-            val => Cmd::Val(val),
-        }
-    }
 }
 
 pub struct Db {
@@ -239,6 +329,7 @@ impl Db {
             Cmd::Sub(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, sub),
             Cmd::Sum(arg) => self.eval_unary_cmd(*arg, sum),
             Cmd::Sums(arg) => self.eval_unary_cmd(*arg, sums),
+            Cmd::Sql(sql) => JsonVal::Val(sql.eval(self)),
             Cmd::Unique(arg) => self.eval_unary_cmd(*arg, unique),
             Cmd::Val(val) => JsonVal::Val(val),
         }
