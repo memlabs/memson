@@ -4,7 +4,7 @@ mod db;
 use actix_web::{HttpResponse};
 use actix_web::Responder;
 use std::sync::Mutex;
-use actix_web::{post, web, App, HttpServer};
+use actix_web::{get, post, web, App, HttpServer};
 use db::{Cmd, Db, Json};
 use actix_web::http::StatusCode;
 
@@ -17,6 +17,11 @@ impl DbState {
     fn new() -> Self {
         DbState { db: Mutex::new(Db::new()) }
     }
+}
+
+#[get("/pulse")]
+async fn healthcheck() -> impl Responder {
+    HttpResponse::build(StatusCode::OK)
 }
 
 #[post("/eval")]
