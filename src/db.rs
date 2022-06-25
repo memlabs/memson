@@ -144,6 +144,7 @@ impl Cmd {
                         "sql" => Cmd::Sql(Box::new(Query::parse(val))),
                         "unique" => parse_unr_cmd(Cmd::Unique, val),
                         "val" => Cmd::Val(val),
+                        "watch" => parse_op(Cmd::Watch, val),
                         _ => Cmd::Val(json!({key: val}))
                     }
                 } else {
@@ -233,7 +234,6 @@ impl Query {
         
         let mut aggs = Map::new();
 
-        
         for doc in docs {
             let by: Cmd = bys[0].clone(); 
             let key = match by.eval_val(&doc) {
@@ -345,6 +345,7 @@ impl Entry {
     fn from(val: Arc<Json>) -> Self {
         Self { val, watchers: Vec::new() }
     }
+
 }
 
 
@@ -383,14 +384,22 @@ impl Db {
     }
     
     fn set(&mut self, key: String, val: Arc<Json>) -> Option<Arc<Json>> {
-        if let Some( entry) = self.data.get_mut(&key) {
+        let r = if let Some(entry) = self.data.get_mut(&key) {
             let old_val = entry.val.clone();
-            entry.val = val;
+            entry.val = val;                     
             Some(old_val)
         } else {
-            self.data.insert(key, Entry::from(val));
+            self.data.insert(key.clone(), Entry::from(val));
             None
+        };
+        
+        let entry = self.data.get(&key).unwrap();
+
+        for watcher in entry.watchers.clone() {
+            let _ = self.eval(watcher);
         }
+
+        r
     }
 
     fn set_val(&mut self, key: String, arg: Cmd) -> Result<JsonVal> {
@@ -427,14 +436,14 @@ impl Db {
             Cmd::Sum(arg) => self.eval_unary_cmd(*arg, sum),
             Cmd::Sums(arg) => self.eval_unary_cmd(*arg, sums),
             Cmd::Sql(sql) => Ok(JsonVal::Val(sql.eval(self)?)),
-            Cmd::Watch(watch, cmd) => self.eval_watch(watch, *cmd),
+            Cmd::Watch(watch, cmd) => self.eval_watch(&watch, *cmd),
             Cmd::Unique(arg) => self.eval_unary_cmd(*arg, unique),
             Cmd::Val(val) => Ok(JsonVal::Val(val)),
         }
     }
 
-    fn eval_watch(&mut self, watch: String, cmd: Cmd) -> Result<JsonVal> {
-        if let Some(entry) = self.data.get_mut(&watch) {
+    fn eval_watch(&mut self, watch: &str, cmd: Cmd) -> Result<JsonVal> {
+        if let Some(entry) = self.data.get_mut(watch) {
             entry.watchers.push(cmd);
             Ok(JsonVal::Val(Json::Null))
         } else {
