@@ -28,8 +28,10 @@ async fn healthcheck() -> impl Responder {
 async fn eval(cmd: web::Json<Json>, db_state: web::Data<DbState>) -> impl Responder {
     let mut db = db_state.db.lock().unwrap();
     let cmd = Cmd::parse(cmd.into_inner());
-    let val = db.eval(cmd);
-    HttpResponse::build(StatusCode::OK).json(val.as_ref())
+    match db.eval(cmd) {
+        Ok(val) => HttpResponse::build(StatusCode::OK).json(val.as_ref()),
+        Err(err) => HttpResponse::build(StatusCode::OK).json(err),
+    }
 }
 
 #[actix_web::main]

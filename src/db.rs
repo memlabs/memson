@@ -9,6 +9,8 @@ use serde_json::Number;
 use serde_json::json;
 
 
+pub type Result<T> = std::result::Result<T, &'static str>;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Cmd {
     #[serde(rename="+")]
@@ -64,7 +66,7 @@ pub enum Cmd {
     #[serde(rename="val")]
     Val(Json),
     #[serde(rename="watch")]
-    Watch(String, String),
+    Watch(String, Box<Cmd>),
 }
 
 impl Cmd {
@@ -185,19 +187,19 @@ impl Query {
         }
     }
     
-    fn eval(&self, db: &mut Db) -> Json {
+    fn eval(&self, db: &mut Db) -> Result<Json> {
         // evaluate from
-        let docs = self.eval_from(db);
+        let docs = self.eval_from(db)?;
         // filter docs
-        let docs = self.eval_where(db, docs);
+        let docs = self.eval_where(db, docs)?;
 
         let val = self.eval_by(docs, db);
 
-        match val {
+        Ok(match val {
             Json::Array(arr) => self.eval_select_vec(arr),
             Json::Object(obj) => self.eval_select_obj(obj),
             _ => Json::Null,
-        }
+        })
     }
 
     fn eval_select_obj(&self, obj: Map<String, Json>) -> Json {
@@ -223,7 +225,7 @@ impl Query {
         }
     }
 
-    fn eval_by(&self, docs: Vec<Json>, db: &mut Db) -> Json {
+    fn eval_by(&self, docs: Vec<Json>, _db: &mut Db) -> Json {
         let bys = match &self.by {
             Some(bys) => bys.clone(),
             None => return Json::Array(docs),
@@ -245,18 +247,18 @@ impl Query {
         Json::Object(aggs)
     }
 
-    fn eval_from(&self, db: &mut Db) -> Vec<Json> {
-        let val = db.eval(self.from.clone());
+    fn eval_from(&self, db: &mut Db) -> Result<Vec<Json>> {
+        let val = db.eval(self.from.clone())?;
         match val.into_json() {
-            Json::Array(arr) => arr,
+            Json::Array(arr) => Ok(arr),
             _ => unimplemented!(),
         }
     }
 
-    fn eval_where(&self, db: &mut Db, docs: Vec<Json>) -> Vec<Json> {
-        if let Some(filter) = self.filters.clone() {
+    fn eval_where(&self, db: &mut Db, docs: Vec<Json>) -> Result<Vec<Json>> {
+        Ok(if let Some(filter) = self.filters.clone() {
             let cmd = filter.eval_docs(&docs);
-            match db.eval(cmd) {
+            match db.eval(cmd)? {
                 JsonVal::Val(Json::Array(flags)) => {
                     let mut out = Vec::new();
                     for (flag, doc) in flags.iter().zip(docs.into_iter()) {
@@ -270,7 +272,7 @@ impl Query {
             }
         } else {
             docs
-        }
+        })
     }
 }
 
@@ -334,18 +336,12 @@ fn parse_set(val: Json) -> Cmd {
     parse_op(Cmd::Set, val)
 }
 
-struct Watcher {
-    name: String,
-    cmd: Cmd,
-}
-
 struct Entry {
     val: Arc<Json>,
-    watchers: Vec<Watcher>
+    watchers: Vec<Cmd>
 }
 
 impl Entry {
-
     fn from(val: Arc<Json>) -> Self {
         Self { val, watchers: Vec::new() }
     }
@@ -397,12 +393,12 @@ impl Db {
         }
     }
 
-    fn set_val(&mut self, key: String, arg: Cmd) -> JsonVal {
-        let val = self.eval(arg);
-        self.set(key, val.into_arc()).map(JsonVal::Arc).unwrap_or_else(|| JsonVal::Arc(Arc::new(Json::Null)))
+    fn set_val(&mut self, key: String, arg: Cmd) -> Result<JsonVal> {
+        let val = self.eval(arg)?;
+        Ok(self.set(key, val.into_arc()).map(JsonVal::Arc).unwrap_or_else(|| JsonVal::Arc(Arc::new(Json::Null))))
     }    
 
-    pub fn eval(&mut self, cmd: Cmd) -> JsonVal {
+    pub fn eval(&mut self, cmd: Cmd) -> Result<JsonVal> {
         match cmd {
             Cmd::Add(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, add),
             Cmd::Avg(arg) => self.eval_unary_cmd(*arg, avg),
@@ -411,12 +407,12 @@ impl Db {
             Cmd::Eq(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, eq),
             Cmd::First(arg) => self.eval_unary_cmd(*arg, &first),
             Cmd::Ge(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, ge),
-            Cmd::Get(key) => self.eval_get(&key),
+            Cmd::Get(key) => Ok(self.eval_get(&key)),
             Cmd::Gt(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, gt),
             Cmd::If(pred, lhs, rhs) => self.eval_if(*pred, *lhs, *rhs),
             Cmd::Key(key, arg) => {
-                let val = self.eval(*arg);
-                JsonVal::Val(self.eval_key(&key, val.as_ref()))
+                let val = self.eval(*arg)?;
+                Ok(JsonVal::Val(self.eval_key(&key, val.as_ref())))
             }
             Cmd::Last(arg) => self.eval_unary_cmd(*arg, last),
             Cmd::Len(arg) => self.eval_unary_cmd(*arg, len),
@@ -430,10 +426,19 @@ impl Db {
             Cmd::Sub(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, sub),
             Cmd::Sum(arg) => self.eval_unary_cmd(*arg, sum),
             Cmd::Sums(arg) => self.eval_unary_cmd(*arg, sums),
-            Cmd::Sql(sql) => JsonVal::Val(sql.eval(self)),
-            Cmd::Watch(_watch, _recalc) => unimplemented!(),
+            Cmd::Sql(sql) => Ok(JsonVal::Val(sql.eval(self)?)),
+            Cmd::Watch(watch, cmd) => self.eval_watch(watch, *cmd),
             Cmd::Unique(arg) => self.eval_unary_cmd(*arg, unique),
-            Cmd::Val(val) => JsonVal::Val(val),
+            Cmd::Val(val) => Ok(JsonVal::Val(val)),
+        }
+    }
+
+    fn eval_watch(&mut self, watch: String, cmd: Cmd) -> Result<JsonVal> {
+        if let Some(entry) = self.data.get_mut(&watch) {
+            entry.watchers.push(cmd);
+            Ok(JsonVal::Val(Json::Null))
+        } else {
+            Err("bad key")
         }
     }
 
@@ -441,26 +446,27 @@ impl Db {
         json_key(key, val)
     }
 
-    fn eval_eval(&mut self, arg: Json) -> JsonVal {
-        let val = self.eval(Cmd::parse(arg));
+    fn eval_eval(&mut self, arg: Json) -> Result<JsonVal> {
+        let val = self.eval(Cmd::parse(arg))?;
         let cmd = Cmd::parse(val.into_json());
         self.eval(cmd)
     }
 
-    fn eval_unary_cmd<F:Fn(&Json) -> Json>(&mut self, arg: Cmd, f: F) -> JsonVal {
-        let val = self.eval(arg);
-        JsonVal::Val(f(val.as_ref()))
+    fn eval_unary_cmd<F:Fn(&Json) -> Json>(&mut self, arg: Cmd, f: F) -> Result<JsonVal> {
+        let val = self.eval(arg)?;
+        Ok(JsonVal::Val(f(val.as_ref())))
     }
 
-    fn eval_binary_cmd<F:Fn(&Json, &Json) -> Json>(&mut self, lhs: Cmd, rhs: Cmd, f: F) -> JsonVal {
-        let (x, y)  = (self.eval(lhs), self.eval(rhs));
-        JsonVal::Val(f(x.as_ref(), y.as_ref()))
+    fn eval_binary_cmd<F:Fn(&Json, &Json) -> Json>(&mut self, lhs: Cmd, rhs: Cmd, f: F) -> Result<JsonVal> {
+        let (x, y)  = (self.eval(lhs)?, self.eval(rhs)?);
+        Ok(JsonVal::Val(f(x.as_ref(), y.as_ref())))
     }
 
-    fn eval_if(&mut self, pred: Cmd, lhs: Cmd, rhs: Cmd) -> JsonVal {
-        match self.eval(pred).as_ref() {
+    fn eval_if(&mut self, pred: Cmd, lhs: Cmd, rhs: Cmd) -> Result<JsonVal> {
+        match self.eval(pred)?.as_ref() {
             Json::Bool(true) => self.eval(lhs),
-            _ => self.eval(rhs),
+            Json::Bool(false) => self.eval(rhs),
+            _ => Err("bad type"),            
         }
     }
 }
