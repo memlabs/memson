@@ -370,7 +370,6 @@ impl Db {
         match self.get(keys[0]) {
             Some(val) => {
                 
-                println!("{:?}", keys);
                 if keys.len() > 1 {
                     JsonVal::Val(gets(val.as_ref(), &keys[1..]))
                 } else {
