@@ -8,7 +8,6 @@ pub use serde_json::Value as Json;
 use serde_json::Number;
 use serde_json::json;
 
-
 pub type Result<T> = std::result::Result<T, &'static str>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -63,6 +62,8 @@ pub enum Cmd {
     Sums(Box<Cmd>),      
     #[serde(rename="sql")]
     Sql(Box<Query>),
+    #[serde(rename="stmt")]
+    Statement(Vec<Cmd>),  
     #[serde(rename="val")]
     Val(Json),
     #[serde(rename="watch")]
@@ -150,6 +151,13 @@ impl Cmd {
                 } else {
                     Cmd::Val(Json::Object(obj))
                 }
+            }
+            Json::Array(arr) => {
+                let mut out = Vec::new();
+                for val in arr {
+                    out.push(Cmd::parse(val));
+                }
+                Cmd::Statement(out)
             }
             val => Cmd::Val(val),
         }
@@ -435,6 +443,13 @@ impl Db {
             Cmd::Sum(arg) => self.eval_unary_cmd(*arg, sum),
             Cmd::Sums(arg) => self.eval_unary_cmd(*arg, sums),
             Cmd::Sql(sql) => Ok(JsonVal::Val(sql.eval(self)?)),
+            Cmd::Statement(stmt) => {
+                let mut out = Vec::with_capacity(stmt.len());
+                for val in stmt {
+                    out.push(self.eval(val)?.into_json());
+                }
+                Ok(JsonVal::Val(Json::Array(out)))
+            }
             Cmd::Watch(watch, cmd) => self.eval_watch(&watch, *cmd),
             Cmd::Unique(arg) => self.eval_unary_cmd(*arg, unique),
             Cmd::Val(val) => Ok(JsonVal::Val(val)),
