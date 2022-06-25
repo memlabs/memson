@@ -1,4 +1,5 @@
 
+use serde_json::Map;
 use std::cmp::{Ord, Ordering};
 use std::sync::Arc;
 use std::collections::BTreeMap;
@@ -62,29 +63,47 @@ pub enum Cmd {
     Sql(Box<Query>),
     #[serde(rename="val")]
     Val(Json),
+    #[serde(rename="watch")]
+    Watch(String, String),
 }
 
 impl Cmd {
 
-    fn eval(self, docs: &[Json]) -> Cmd {
+    fn eval_val(&self, doc: &Json) -> Json {
+        match self {
+            Cmd::Get(key) => get(doc, key),
+            Cmd::Add(lhs, rhs) => {
+                let (lhs, rhs) = (lhs.eval_val(doc), rhs.eval_val(doc));
+                add(&lhs, &rhs)
+            }
+            Cmd::Val(Json::String(s)) => {
+                if let Some(key) = s.strip_prefix('$') {
+                    get(doc, key)
+                } else {
+                    Json::String(s.clone())
+                }
+            }   
+            _ => unimplemented!(),
+        }
+    }
+
+    fn eval_docs(&self, docs: &[Json]) -> Cmd {
         fn bin_f<F:Fn(Box<Cmd>, Box<Cmd>) -> Cmd>(f: F,lhs: Cmd, rhs: Cmd, docs: &[Json]) -> Cmd { 
-            let x = Box::new(lhs.eval(docs));
-            let y = Box::new(rhs.eval(docs));
+            let x = Box::new(lhs.eval_docs(docs));
+            let y = Box::new(rhs.eval_docs(docs));
             f(x, y) 
         }
-        println!("{:?}", self);
         match self {
-            Cmd::Eq(lhs, rhs) => bin_f(Cmd::Eq, *lhs, *rhs, docs),
-            Cmd::NotEq(lhs, rhs) => bin_f(Cmd::NotEq, *lhs, *rhs, docs),
-            Cmd::Val(Json::String(val)) => {
-                if val.starts_with('$') {
-                    let key = &val[1..];
+            Cmd::Eq(lhs, rhs) => bin_f(Cmd::Eq, lhs.as_ref().clone(), rhs.as_ref().clone(), docs),
+            Cmd::NotEq(lhs, rhs) => bin_f(Cmd::NotEq, lhs.as_ref().clone(), rhs.as_ref().clone(), docs),
+            Cmd::Val(Json::String(s)) => {
+                if let Some(key) = s.strip_prefix('$') {
                     let val = docs.iter().map(|doc| doc.get(key).cloned().unwrap_or(Json::Null)).collect();
                     Cmd::Val(Json::Array(val))
-                    
                 } else {
-                    Cmd::Val(Json::String(val))
+                    Cmd::Val(Json::String(s.clone()))
                 }
+
             }
             _ => unimplemented!(),
         }
@@ -138,9 +157,9 @@ impl Cmd {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Query {
-    select: Option<Vec<Json>>,
+    select: Option<Map<String,Json>>,
     from: Cmd,
-    by: Option<Vec<Json>>,
+    by: Option<Vec<Cmd>>,
     #[serde(rename="where")]
     filters: Option<Cmd>
 }
@@ -151,7 +170,16 @@ impl Query {
             Json::Object(obj) => {
                 let from = Cmd::parse(obj.get("from").cloned().unwrap());
                 let filters = obj.get("where").cloned().map(Cmd::parse);
-                Query{ select: None, from, by: None, filters }
+                let select = match obj.get("select") {
+                    None => None,
+                    Some(Json::Object(obj)) => Some(obj.clone()),
+                    _ => None,
+                };
+                let by: Option<Vec<Cmd>> = match obj.get("by").cloned() {
+                    Some(Json::Array(arr)) => Some(arr.into_iter().map(Cmd::parse).collect()),
+                    _ => None,
+                };
+                Query{ select, from, by, filters }
             }
             _ => unimplemented!(),
         }
@@ -163,12 +191,63 @@ impl Query {
         // filter docs
         let docs = self.eval_where(db, docs);
 
-        Json::Array(docs)
+        let val = self.eval_by(docs, db);
+
+        match val {
+            Json::Array(arr) => self.eval_select_vec(arr),
+            Json::Object(obj) => self.eval_select_obj(obj),
+            _ => Json::Null,
+        }
+    }
+
+    fn eval_select_obj(&self, obj: Map<String, Json>) -> Json {
+        Json::Object(obj)
+    }
+
+    fn eval_select_vec(&self, docs: Vec<Json>) -> Json {
+        if let Some(selects) = &self.select {
+            let mut out = Vec::new();
+            for doc in docs {
+                let mut obj = Map::new();
+                for (key, select) in selects.iter() {
+                    let cmd = Cmd::parse(select.clone());
+                    let val = cmd.eval_val(&doc);
+                    let k = if let Some(k) = key.strip_prefix('$') { k.to_string() } else { key.clone() }; 
+                    obj.insert(k, val);
+                }
+                out.push(Json::Object(obj));
+            }
+            Json::Array(out)
+        } else {
+            Json::Array(docs)
+        }
+    }
+
+    fn eval_by(&self, docs: Vec<Json>, db: &mut Db) -> Json {
+        let bys = match &self.by {
+            Some(bys) => bys.clone(),
+            None => return Json::Array(docs),
+        };
+        
+        let mut aggs = Map::new();
+
+        
+        for doc in docs {
+            let by: Cmd = bys[0].clone(); 
+            let key = match by.eval_val(&doc) {
+                Json::String(s) => s,
+                val => val.to_string(), 
+            };
+            let vals = aggs.entry(key.to_string()).or_insert_with(|| Json::Array(Vec::new()));
+            vals.as_array_mut().unwrap().push(doc);
+        }
+
+        Json::Object(aggs)
     }
 
     fn eval_from(&self, db: &mut Db) -> Vec<Json> {
         let val = db.eval(self.from.clone());
-        match val.to_json() {
+        match val.into_json() {
             Json::Array(arr) => arr,
             _ => unimplemented!(),
         }
@@ -176,7 +255,7 @@ impl Query {
 
     fn eval_where(&self, db: &mut Db, docs: Vec<Json>) -> Vec<Json> {
         if let Some(filter) = self.filters.clone() {
-            let cmd = filter.eval(&docs);
+            let cmd = filter.eval_docs(&docs);
             match db.eval(cmd) {
                 JsonVal::Val(Json::Array(flags)) => {
                     let mut out = Vec::new();
@@ -255,8 +334,26 @@ fn parse_set(val: Json) -> Cmd {
     parse_op(Cmd::Set, val)
 }
 
+struct Watcher {
+    name: String,
+    cmd: Cmd,
+}
+
+struct Entry {
+    val: Arc<Json>,
+    watchers: Vec<Watcher>
+}
+
+impl Entry {
+
+    fn from(val: Arc<Json>) -> Self {
+        Self { val, watchers: Vec::new() }
+    }
+}
+
+
 pub struct Db {
-    data: BTreeMap<String, Arc<Json>>,
+    data: BTreeMap<String, Entry>,
 }
 
 impl Db {
@@ -267,7 +364,7 @@ impl Db {
     }
 
     fn get(&self, key: &str) -> Option<Arc<Json>> {
-        self.data.get(key).cloned()
+        self.data.get(key).map(|e| e.val.clone())
     }
 
     fn eval_get(&self, key: &str) -> JsonVal {
@@ -280,7 +377,7 @@ impl Db {
                 if keys.len() > 1 {
                     JsonVal::Val(gets(val.as_ref(), &keys[1..]))
                 } else {
-                    JsonVal::Arc(val.clone())
+                    JsonVal::Arc(val)
                 }
                 
             }
@@ -290,12 +387,19 @@ impl Db {
     }
     
     fn set(&mut self, key: String, val: Arc<Json>) -> Option<Arc<Json>> {
-        self.data.insert(key, val)
+        if let Some( entry) = self.data.get_mut(&key) {
+            let old_val = entry.val.clone();
+            entry.val = val;
+            Some(old_val)
+        } else {
+            self.data.insert(key, Entry::from(val));
+            None
+        }
     }
 
     fn set_val(&mut self, key: String, arg: Cmd) -> JsonVal {
         let val = self.eval(arg);
-        self.set(key, val.to_arc()).map(JsonVal::Arc).unwrap_or(JsonVal::Arc(Arc::new(Json::Null)))
+        self.set(key, val.into_arc()).map(JsonVal::Arc).unwrap_or_else(|| JsonVal::Arc(Arc::new(Json::Null)))
     }    
 
     pub fn eval(&mut self, cmd: Cmd) -> JsonVal {
@@ -327,6 +431,7 @@ impl Db {
             Cmd::Sum(arg) => self.eval_unary_cmd(*arg, sum),
             Cmd::Sums(arg) => self.eval_unary_cmd(*arg, sums),
             Cmd::Sql(sql) => JsonVal::Val(sql.eval(self)),
+            Cmd::Watch(_watch, _recalc) => unimplemented!(),
             Cmd::Unique(arg) => self.eval_unary_cmd(*arg, unique),
             Cmd::Val(val) => JsonVal::Val(val),
         }
@@ -338,7 +443,7 @@ impl Db {
 
     fn eval_eval(&mut self, arg: Json) -> JsonVal {
         let val = self.eval(Cmd::parse(arg));
-        let cmd = Cmd::parse(val.to_json());
+        let cmd = Cmd::parse(val.into_json());
         self.eval(cmd)
     }
 
@@ -692,6 +797,7 @@ mod tests {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum JsonVal {
     Val(Json),
     Arc(Arc<Json>),
@@ -705,14 +811,14 @@ impl JsonVal {
         }
     }
 
-    pub fn to_arc(self) -> Arc<Json> {
+    pub fn into_arc(self) -> Arc<Json> {
         match self {
             JsonVal::Val(val) => Arc::new(val),
-            JsonVal::Arc(val) => val.clone(),
+            JsonVal::Arc(val) => val,
         }
     }
 
-    pub fn to_json(self) -> Json {
+    pub fn into_json(self) -> Json {
         match self {
             JsonVal::Arc(val) => val.as_ref().clone(),
             JsonVal::Val(val) => val,
