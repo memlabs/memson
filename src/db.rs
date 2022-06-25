@@ -515,16 +515,6 @@ fn scalar_vec_op<F:Fn(&Json, &Json) -> Json>(lhs: &Json, rhs:&[Json], op: F) -> 
     Json::Array(rhs.iter().map(|y| op(lhs, y)).collect())
 } 
 
-
-// fn vec_op<F:Fn(&Json, &Json) -> Json>(x: &Json, y: &Json, op: F) -> Json {
-//     match (x, y) {
-//         (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, op),
-//         (Json::Array(x), y) => vec_scalar_op(x, y, op),
-//         (x, Json::Array(y)) => scalar_vec_op(x, y, op),
-//         (x, y) => op(x, y)
-//     }
-// }
-
 fn gets(val: &Json, keys: &[&str]) -> Json {
     let mut i = 0;
     let mut out = Json::Null;
