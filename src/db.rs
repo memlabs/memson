@@ -503,9 +503,9 @@ impl Db {
     }
 }
 
-fn scalars_op<F:Fn(i64, i64) -> i64, G:Fn(f64, f64) -> f64>(x: &Number, y: &Number, f: F, g: G) -> Json {
-    match (x.as_i64(), y.as_i64()) {
-        (Some(x), Some(y)) => Json::from(f(x, y)),
+fn scalars_op<G:Fn(f64, f64) -> f64>(x: &Number, y: &Number, g: G) -> Json {
+    match (x.as_f64(), y.as_f64()) {
+        (Some(x), Some(y)) => Json::from(g(x, y)),
         (Some(x), None) => Json::from(g(x as f64, y.as_f64().unwrap())),
         (None, Some(y)) => Json::from(g(x.as_f64().unwrap(), y as f64)),
         (None, None) => Json::from(g(x.as_f64().unwrap(), y.as_f64().unwrap())),
@@ -547,7 +547,7 @@ fn get(val: &Json, key: &str) -> Json {
 
 pub fn add(x: &Json, y: &Json) -> Json {
     match (x, y) {
-        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x + y, &|x,y| x + y),
+        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x + y),
         (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, &add),
         (Json::Array(x), y) => vec_scalar_op(x, y, &add),
         (x, Json::Array(y)) => scalar_vec_op(x, y, &add),
@@ -560,7 +560,7 @@ pub fn add(x: &Json, y: &Json) -> Json {
 
 pub fn mul(x: &Json, y: &Json) -> Json {
     match (x, y) {
-        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x * y, &|x,y| x * y),
+        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x * y),
         (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, &mul),
         (Json::Array(x), y) => vec_scalar_op(x, y, &mul),
         (x, Json::Array(y)) => scalar_vec_op(x, y, &mul),
@@ -570,7 +570,7 @@ pub fn mul(x: &Json, y: &Json) -> Json {
 
 pub fn div(x: &Json, y: &Json) -> Json {
     match (x, y) {
-        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x / y, &|x,y| x / y),
+        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x / y),
         (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, &div),
         (Json::Array(x), y) => vec_scalar_op(x, y, &div),
         (x, Json::Array(y)) => scalar_vec_op(x, y, &div),
@@ -580,7 +580,7 @@ pub fn div(x: &Json, y: &Json) -> Json {
 
 pub fn sub(x: &Json, y: &Json) -> Json {
     match (x, y) {
-        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x + y, &|x,y| x - y),
+        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x - y),
         (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, &sub),
         (Json::Array(x), y) => vec_scalar_op(x, y, &sub),
         (x, Json::Array(y)) => scalar_vec_op(x, y, &sub),
