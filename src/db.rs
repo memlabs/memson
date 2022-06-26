@@ -441,6 +441,12 @@ impl Db {
             Cmd::Min(arg) => self.eval_unary_cmd(*arg, min),
             Cmd::Mul(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, mul),
             Cmd::NotEq(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, not_eq),
+            Cmd::Rm(key) => {
+                match self.data.remove(&key) {
+                    Some(entry) => Ok(JsonVal::Arc(entry.val)),
+                    None => Ok(JsonVal::Val(Json::Null)),
+                }
+            }
             Cmd::Set(key, arg) => self.set_val(key, *arg),
             Cmd::Sub(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, sub),
             Cmd::Sum(arg) => self.eval_unary_cmd(*arg, sum),
