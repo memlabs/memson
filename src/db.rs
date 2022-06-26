@@ -592,7 +592,7 @@ pub fn avg(val: &Json) -> Json {
     match val {
         Json::Array(arr) => {
             let total = sum_arr(arr);
-            div(&total, &Json::from(arr.len()))
+            div(&total, &Json::from(arr.len() as f64))
         }
         x@Json::Number(_) => x.clone(),
         _ => unimplemented!()
