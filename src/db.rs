@@ -561,7 +561,7 @@ pub fn mul(x: &Json, y: &Json) -> Json {
 
 pub fn div(x: &Json, y: &Json) -> Json {
     match (x, y) {
-        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x * y, &|x,y| x / y),
+        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x / y, &|x,y| x / y),
         (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, &div),
         (Json::Array(x), y) => vec_scalar_op(x, y, &div),
         (x, Json::Array(y)) => scalar_vec_op(x, y, &div),
