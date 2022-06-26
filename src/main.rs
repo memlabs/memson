@@ -37,7 +37,10 @@ async fn eval(cmd: web::Json<Json>, db_state: web::Data<DbState>) -> impl Respon
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let port = env!("PORT", "$PORT is not set");
+    let port = match env::var("PORT") {
+        Ok(port) => port,
+        Err(e) => panic!("${} is not set ({})", "PORT", e)
+    };
 
     let port_no: u16 = port.parse::<u16>().unwrap();
     

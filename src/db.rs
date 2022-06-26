@@ -52,6 +52,8 @@ pub enum Cmd {
     NotEq(Box<Cmd>, Box<Cmd>), 
     #[serde(rename="unique")]
     Unique(Box<Cmd>),            
+    #[serde(rename="rm")]
+    Rm(String),
     #[serde(rename="set")]
     Set(String, Box<Cmd>),
     #[serde(rename="-")]
@@ -132,13 +134,14 @@ impl Cmd {
                         "avg" => parse_unr_cmd(Cmd::Avg, val),
                         "eval" => Cmd::Eval(val),
                         "first" => parse_unr_cmd(Cmd::First, val),
-                        "get" => parse_get(val),
+                        "get" => parse_unr_str_cmd(Cmd::Get, val),
                         "if" => parse_tern_cmd(Cmd::If, val),
                         "key" => parse_key(val),
                         "last" => parse_unr_cmd(Cmd::Last, val),
                         "len" => parse_unr_cmd(Cmd::Len, val),
                         "max" => parse_unr_cmd(Cmd::Max, val),
                         "min" => parse_unr_cmd(Cmd::Min, val),
+                        "rm" => parse_unr_str_cmd(Cmd::Rm, val),
                         "set" => parse_set(val),
                         "sum" => parse_unr_cmd(Cmd::Sum, val),
                         "sums" => parse_unr_cmd(Cmd::Sums, val),
@@ -315,9 +318,9 @@ fn parse_arg(val: Json) -> Box<Cmd> {
     Box::new(Cmd::parse(val))
 }
 
-fn parse_get(val: Json) -> Cmd {
+fn parse_unr_str_cmd<F:Fn(String) -> Cmd>(f: F, val: Json) -> Cmd {
     match val {
-        Json::String(s) => Cmd::Get(s),
+        Json::String(s) => f(s),
         val => Cmd::Val(val),
     }
 }
