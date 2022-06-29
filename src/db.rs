@@ -10,6 +10,72 @@ use serde_json::json;
 
 pub type Result<T> = std::result::Result<T, &'static str>;
 
+#[derive(Clone, Debug)]
+pub enum JsonVal {
+    Val(Json),
+    Arc(Arc<Json>),
+}
+
+impl JsonVal {
+    pub fn as_ref(&self) -> &Json {
+        match self {
+            JsonVal::Val(val) => val,
+            JsonVal::Arc(val) => val.as_ref(),
+        }
+    }
+
+    pub fn into_arc(self) -> Arc<Json> {
+        match self {
+            JsonVal::Val(val) => Arc::new(val),
+            JsonVal::Arc(val) => val,
+        }
+    }
+
+    pub fn into_json(self) -> Json {
+        match self {
+            JsonVal::Arc(val) => val.as_ref().clone(),
+            JsonVal::Val(val) => val,
+        }
+    }
+}
+
+fn add_numbers(x: &Number, y: &Number) -> Json {
+    match (x.is_f64(), y.is_f64()) {
+        (true, true) => Json::from(x.as_f64().unwrap() + y.as_f64().unwrap()),
+        (true, false) => Json::from(x.as_f64().unwrap() + y.as_i64().unwrap() as f64),
+        (false, true) => Json::from(x.as_i64().unwrap() as f64 + y.as_f64().unwrap()),
+        (false, false) => Json::from(x.as_i64().unwrap() + y.as_i64().unwrap()),
+    }
+}
+
+fn mul_numbers(x: &Number, y: &Number) -> Json {
+    match (x.is_f64(), y.is_f64()) {
+        (true, true) => Json::from(x.as_f64().unwrap() * y.as_f64().unwrap()),
+        (true, false) => Json::from(x.as_f64().unwrap() * y.as_i64().unwrap() as f64),
+        (false, true) => Json::from(x.as_i64().unwrap() as f64 * y.as_f64().unwrap()),
+        (false, false) => Json::from(x.as_i64().unwrap() * y.as_i64().unwrap()),
+    }
+}
+
+fn div_numbers(x: &Number, y: &Number) -> Json {
+    match (x.is_f64(), y.is_f64()) {
+        (true, true) => Json::from(x.as_f64().unwrap() / y.as_f64().unwrap()),
+        (true, false) => Json::from(x.as_f64().unwrap() / y.as_f64().unwrap()),
+        (false, true) => Json::from(x.as_f64().unwrap() / y.as_f64().unwrap()),
+        (false, false) => Json::from(x.as_f64().unwrap() / y.as_f64().unwrap()),
+    }
+}
+
+fn sub_numbers(x: &Number, y: &Number) -> Json {
+    match (x.is_f64(), y.is_f64()) {
+        (true, true) => Json::from(x.as_f64().unwrap() - y.as_f64().unwrap()),
+        (true, false) => Json::from(x.as_f64().unwrap() - y.as_i64().unwrap() as f64),
+        (false, true) => Json::from(x.as_i64().unwrap() as f64 - y.as_f64().unwrap()),
+        (false, false) => Json::from(x.as_i64().unwrap() - y.as_i64().unwrap()),
+    }
+}
+
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Cmd {
     #[serde(rename="+")]
@@ -547,7 +613,7 @@ fn get(val: &Json, key: &str) -> Json {
 
 pub fn add(x: &Json, y: &Json) -> Json {
     match (x, y) {
-        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x + y),
+        (Json::Number(x), Json::Number(y)) => add_numbers(x, y),
         (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, &add),
         (Json::Array(x), y) => vec_scalar_op(x, y, &add),
         (x, Json::Array(y)) => scalar_vec_op(x, y, &add),
@@ -560,7 +626,7 @@ pub fn add(x: &Json, y: &Json) -> Json {
 
 pub fn mul(x: &Json, y: &Json) -> Json {
     match (x, y) {
-        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x * y),
+        (Json::Number(x), Json::Number(y)) => mul_numbers(x, y),
         (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, &mul),
         (Json::Array(x), y) => vec_scalar_op(x, y, &mul),
         (x, Json::Array(y)) => scalar_vec_op(x, y, &mul),
@@ -570,7 +636,7 @@ pub fn mul(x: &Json, y: &Json) -> Json {
 
 pub fn div(x: &Json, y: &Json) -> Json {
     match (x, y) {
-        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x / y),
+        (Json::Number(x), Json::Number(y)) => div_numbers(x, y),
         (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, &div),
         (Json::Array(x), y) => vec_scalar_op(x, y, &div),
         (x, Json::Array(y)) => scalar_vec_op(x, y, &div),
@@ -580,7 +646,7 @@ pub fn div(x: &Json, y: &Json) -> Json {
 
 pub fn sub(x: &Json, y: &Json) -> Json {
     match (x, y) {
-        (Json::Number(x), Json::Number(y)) => scalars_op(x, y, &|x,y| x - y),
+        (Json::Number(x), Json::Number(y)) => sub_numbers(x, y),
         (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, &sub),
         (Json::Array(x), y) => vec_scalar_op(x, y, &sub),
         (x, Json::Array(y)) => scalar_vec_op(x, y, &sub),
@@ -794,6 +860,7 @@ fn unique(val: &Json) -> Json {
 mod tests {
     use super::*;
     use serde_json::json;
+    use approx_eq::assert_approx_eq;
     
 
     #[test]
@@ -823,33 +890,71 @@ mod tests {
     fn json_key_ok() {
         assert_eq!(json_key("a", &json!({"a":1,"b":2})), json!(1));
     }
-}
 
-#[derive(Clone, Debug)]
-pub enum JsonVal {
-    Val(Json),
-    Arc(Arc<Json>),
-}
 
-impl JsonVal {
-    pub fn as_ref(&self) -> &Json {
-        match self {
-            JsonVal::Val(val) => val,
-            JsonVal::Arc(val) => val.as_ref(),
+
+    fn num(val: Json) -> Number {
+        match val {
+            Json::Number(n) => n,
+            _ => panic!("bad json")
         }
     }
 
-    pub fn into_arc(self) -> Arc<Json> {
-        match self {
-            JsonVal::Val(val) => Arc::new(val),
-            JsonVal::Arc(val) => val,
-        }
+    fn assert_op<F:Fn(&Number, &Number) -> Json>(f: F, x: Json, y: Json, expected: Json) {
+        assert_eq!(f(&num(x), &num(y)), expected);
     }
 
-    pub fn into_json(self) -> Json {
-        match self {
-            JsonVal::Arc(val) => val.as_ref().clone(),
-            JsonVal::Val(val) => val,
-        }
+    fn assert_add(x: Json, y: Json, expected: Json) {
+        assert_op(add_numbers, x, y, expected);
     }
+
+    fn assert_mul(x: Json, y: Json, expected: Json) {
+        assert_op(mul_numbers, x, y, expected);
+    }    
+
+    fn assert_div(x: Json, y: Json, expected: Json) {
+        assert_op(div_numbers, x, y, expected);
+    }        
+
+    fn assert_sub(x: Json, y: Json, expected: Json) {
+        assert_op(sub_numbers, x, y, expected);
+    }        
+
+    fn assert_nums(x: Json, y: Json) {
+        assert_approx_eq!(x.as_f64().unwrap(), y.as_f64().unwrap());
+    }
+
+    #[test]
+    fn add_number_ok() {
+        assert_add(Json::from(1), Json::from(1), Json::from(2));
+        assert_add(Json::from(1.2), Json::from(1.2), Json::from(2.4));
+        assert_add(Json::from(1), Json::from(1.2), Json::from(2.2));
+        assert_add(Json::from(1.2), Json::from(1), Json::from(2.2));
+    }    
+
+    #[test]
+    fn mul_number_ok() {
+        assert_mul(Json::from(2), Json::from(3), Json::from(6));
+        assert_mul(Json::from(2), Json::from(2.2), Json::from(4.4));
+        assert_mul(Json::from(2.2), Json::from(2), Json::from(4.4));
+        assert_nums(mul(&Json::from(2.2), &Json::from(2.2)), Json::from(4.84));
+    }   
+
+    #[test]
+    fn div_number_ok() {
+        assert_div(Json::from(2), Json::from(4), Json::from(0.5));
+        assert_nums(div(&Json::from(2.1), &Json::from(3)), Json::from(0.7));
+        assert_nums(div(&Json::from(2), &Json::from(3.2)), Json::from(0.625));
+        assert_div(Json::from(2.2), Json::from(2.2), Json::from(1.0));
+    }   
+
+    #[test]
+    fn sub_number_ok() {
+        assert_sub(Json::from(2), Json::from(4), Json::from(-2));
+        assert_nums(sub(&Json::from(2), &Json::from(2.2)), Json::from(-0.2));
+        assert_nums(sub(&Json::from(2.2), &Json::from(2)), Json::from(0.2));
+        assert_nums(sub(&Json::from(2.2), &Json::from(2.1)), Json::from(0.1));
+    }   
+
 }
+
