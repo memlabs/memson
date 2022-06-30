@@ -116,6 +116,10 @@ pub enum Cmd {
     Mul(Box<Cmd>, Box<Cmd>), 
     #[serde(rename="!=")]
     NotEq(Box<Cmd>, Box<Cmd>), 
+    #[serde(rename="prod")]
+    Product(Box<Cmd>), 
+    #[serde(rename="prods")]
+    Products(Box<Cmd>),         
     #[serde(rename="unique")]
     Unique(Box<Cmd>),            
     #[serde(rename="rm")]
@@ -507,6 +511,8 @@ impl Db {
             Cmd::Min(arg) => self.eval_unary_cmd(*arg, min),
             Cmd::Mul(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, mul),
             Cmd::NotEq(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, not_eq),
+            Cmd::Product(arg) => unimplemented!(),
+            Cmd::Products(args) => unimplemented!(),
             Cmd::Rm(key) => {
                 match self.data.remove(&key) {
                     Some(entry) => Ok(JsonVal::Arc(entry.val)),
@@ -614,12 +620,15 @@ fn get(val: &Json, key: &str) -> Json {
 pub fn add(x: &Json, y: &Json) -> Json {
     match (x, y) {
         (Json::Number(x), Json::Number(y)) => add_numbers(x, y),
+        (Json::Bool(lhs), y@Json::Number(_)) => add(&Json::from(*lhs as i64), y),
+        (x@Json::Number(_), Json::Bool(y)) => add(x, &Json::from(*y as i64)),
         (Json::Array(x), Json::Array(y)) => vec_vec_op(x, y, &add),
         (Json::Array(x), y) => vec_scalar_op(x, y, &add),
         (x, Json::Array(y)) => scalar_vec_op(x, y, &add),
         (Json::String(x), Json::String(y)) => Json::String(x.clone() + y),
         (Json::String(x), Json::Number(y)) => Json::String(x.to_string() + &y.to_string()),
         (Json::Number(lhs), Json::String(rhs)) => Json::String(lhs.to_string() + rhs),
+        (Json::Bool(lhs), Json::Bool(rhs)) => Json::from(*lhs as i64 + *rhs as i64),         
         _ => Json::Null
     }
 }
@@ -861,37 +870,6 @@ mod tests {
     use super::*;
     use serde_json::json;
     use approx_eq::assert_approx_eq;
-    
-
-    #[test]
-    fn json_add() {
-        assert_eq!(add(&json!(1i64), &json!(2i64)), json!(1 + 2));
-        assert_eq!(add(&json!(1.1f64), &json!(2.3)), 1.1 + 2.3);
-        assert_eq!(add(&json!([1,2,3]), &json!(2)), json!([1+2,2+2,3+2]));
-        assert_eq!(add(&json!(2),&json!([1,2,3])), json!([2+1,2+2,2+3]));
-        assert_eq!(add(&json!("abc"),&json!("def")), json!("abcdef"));
-    }
-
-    #[test]
-    fn json_sum() {
-        assert_eq!(sum(&json!(1i64)), json!(1));
-        assert_eq!(sum(&json!(1.23f64)), json!(1.23));
-        assert_eq!(sum(&json!(vec![1i64,2,3])), json!(6));
-    }    
-
-    #[test]
-    fn json_sums() {
-        assert_eq!(sums(&json!(1i64)), json!([1]));
-        assert_eq!(sums(&json!(1.23f64)), json!([1.23]));
-        assert_eq!(sums(&json!(vec![1i64,2,3])), json!([1, 1+2, 1+2+3]));
-    }        
-
-    #[test]
-    fn json_key_ok() {
-        assert_eq!(json_key("a", &json!({"a":1,"b":2})), json!(1));
-    }
-
-
 
     fn num(val: Json) -> Number {
         match val {
@@ -956,5 +934,106 @@ mod tests {
         assert_nums(sub(&Json::from(2.2), &Json::from(2.1)), Json::from(0.1));
     }   
 
+    #[test]
+    fn json_add() {
+        assert_eq!(add(&json!(1i64), &json!(2i64)), json!(1 + 2));
+        assert_eq!(add(&json!(1.1f64), &json!(2.3)), 1.1 + 2.3);
+        assert_eq!(add(&json!([1,2,3]), &json!(2)), json!([1+2,2+2,3+2]));
+        assert_eq!(add(&json!(2),&json!([1,2,3])), json!([2+1,2+2,2+3]));
+        assert_eq!(add(&json!("abc"),&json!("def")), json!("abcdef"));
+    }
+
+    #[test]
+    fn json_avg() {
+        assert_eq!(avg(&json!(1)), json!(1));
+        assert_eq!(avg(&json!(1.0)), json!(1.0));
+        assert_eq!(avg(&json!([1,2,3,4,5])), json!(3.0));  
+        assert_eq!(avg(&json!([1.0,2.0,3.0,4.0,5.0])), json!(3.0));                
+    }
+
+    #[test]
+    fn json_div() {
+        assert_eq!(div(&json!(1), &json!(2)), json!(0.5));
+        assert_eq!(div(&json!(1.0), &json!(2.0)), json!(0.5));
+        assert_eq!(div(&json!([1,2,3]), &json!([1,2,3])), json!([1.0,1.0,1.0]));  
+        assert_eq!(div(&json!(1), &json!([1,2,4])), json!([1.0, 0.5, 0.25]));                
+        assert_eq!(div(&json!([1,2,4]), &json!(1)), json!([1.0, 2.0, 4.0]));
+    }   
+    
+    #[test]
+    fn json_eval() {
+        assert_eq!(false, true);
+    }
+
+    #[test]
+    fn json_eq() {
+        assert_eq!(eq(&json!(1), &json!(1)), json!(true));
+        assert_eq!(eq(&json!(1), &json!(2)), json!(false));
+        assert_eq!(eq(&json!("a"), &json!("a")), json!(true));
+        assert_eq!(eq(&json!("a"), &json!("b")), json!(false));
+        assert_eq!(eq(&json!("a"), &json!("a")), json!(true));
+        assert_eq!(eq(&json!("a"), &json!("b")), json!(false));                
+    }
+
+    #[test]
+    fn json_first() {
+        assert_eq!(first(&json!([1,2,3,4])), json!(1));
+        assert_eq!(first(&json!([])), Json::Null);    
+        assert_eq!(first(&json!([1])), json!(1));                
+    }   
+    
+    #[test]
+    fn json_ge() {
+        assert_eq!(ge(&json!(1), &json!(2)), json!(false));
+        assert_eq!(ge(&json!(2), &json!(2)), json!(true)); 
+        assert_eq!(ge(&json!(3), &json!(2)), json!(true));      
+    }    
+    
+    #[test]
+    fn json_gt() {
+        assert_eq!(gt(&json!(1), &json!(2)), json!(false));
+        assert_eq!(gt(&json!(2), &json!(2)), json!(false));
+        assert_eq!(gt(&json!(3), &json!(2)), json!(true));      
+    }   
+    
+    #[test]
+    fn json_if() {
+        assert!(false) // todo implement tests  
+    }    
+    
+    #[test]
+    fn json_key() {
+        assert!(false);   
+    }    
+
+    #[test]
+    fn json_sum() {
+        assert_eq!(sum(&json!(1i64)), json!(1));
+        assert_eq!(sum(&json!(1.23f64)), json!(1.23));
+        assert_eq!(sum(&json!(vec![1i64,2,3])), json!(6));
+        assert_eq!(sum(&json!(vec![true,true,false])), json!(2));
+    }    
+
+    #[test]
+    fn json_sums() {
+        assert_eq!(sums(&json!(1i64)), json!([1]));
+        assert_eq!(sums(&json!(1.23f64)), json!([1.23]));
+        assert_eq!(sums(&json!(vec![1i64,2,3])), json!([1, 1+2, 1+2+3]));
+    }        
+
+    #[test]
+    fn unique_ok() {
+        assert_eq!(unique(&json!([1,1,2,2,2,3])), json!([1,2,3]));
+        assert_eq!(unique(&json!([4,1,1,2,2,2,3])), json!([4,1,2,3]));
+        assert_eq!(unique(&json!(1)), json!(1));
+    }   
+    
+    #[test]
+    fn len_ok() {
+        assert_eq!(len(&json!([1,1,2,2,2,3])), json!(6));
+        assert_eq!(len(&json!([4,1,1,2,2,2,3])), json!(7));
+        assert_eq!(len(&json!(1)), json!(1));
+        assert_eq!(len(&json!([])), json!(0));
+    }       
 }
 
