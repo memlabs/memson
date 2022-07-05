@@ -786,6 +786,7 @@ fn last(val: &Json) -> Json {
 fn len(val: &Json) -> Json {
     match val {
         Json::Array(arr) => Json::from(arr.len()),
+        Json::Object(obj) => Json::from(obj.len()),
         _ => Json::from(1),
     }
 }
@@ -1034,6 +1035,7 @@ mod tests {
         assert_eq!(len(&json!([4,1,1,2,2,2,3])), json!(7));
         assert_eq!(len(&json!(1)), json!(1));
         assert_eq!(len(&json!([])), json!(0));
+        assert_eq!(len(&json!({"a": 1, "b": 2, "c": [1,2,3]})), json!(3))
     }
 }
 
