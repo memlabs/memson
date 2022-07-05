@@ -1034,6 +1034,6 @@ mod tests {
         assert_eq!(len(&json!([4,1,1,2,2,2,3])), json!(7));
         assert_eq!(len(&json!(1)), json!(1));
         assert_eq!(len(&json!([])), json!(0));
-    }       
+    }
 }
 
