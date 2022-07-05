@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+actix-web="*"
 serde = { version = "*", features=["derive"]}
 serde_json="*"
-actix-web="*"
+sled="*"
+
+
 
 [dev-dependencies]
 approx_eq = "*"
