@@ -230,13 +230,6 @@ impl Cmd {
                     Cmd::Val(Json::Object(obj))
                 }
             }
-            Json::Array(arr) => {
-                let mut out = Vec::new();
-                for val in arr {
-                    out.push(Cmd::parse(val));
-                }
-                Cmd::Statement(out)
-            }
             val => Cmd::Val(val),
         }
     }
@@ -448,10 +441,16 @@ impl Db {
 
     pub fn eval(&mut self, cmd: Cmd) -> Result<JsonVal> {
         match cmd {
+            Cmd::Get(key) => {
+                match self.rdb.get(&key) {
+                    Some(val) => Ok(JsonVal::Arc(val)),
+                    None => Ok(JsonVal::Val(Json::Null))
+                }
+            }
             Cmd::Set(key, cmd) => {
-                let val = self.rdb.eval(*cmd)?;
+                let val = self.eval(*cmd)?;
                 self.hdb.insert(&key, val.as_ref()).map_err(|_| "cannot write to hdb")?;
-                let v =val.into_arc();
+                let v = val.into_arc();
                 match self.rdb.set(key, v) {
                     Some(val) => Ok(JsonVal::Arc(val)),
                     None => Ok(JsonVal::Val(Json::Null))
@@ -459,7 +458,10 @@ impl Db {
                 
                 
             }
-            _ => unimplemented!()
+            Cmd::Val(val) => Ok(JsonVal::Val(val)),
+            _ => {
+                unimplemented!()
+            }
         }
     }
 }
@@ -477,7 +479,7 @@ impl OnDiskDb {
 
     fn populate(&mut self) -> io::Result<InMemDb> {
         let mut rdb = InMemDb::new();
-        let mut buf = io::BufReader::new(&mut self.file);
+        let buf = io::BufReader::new(&mut self.file);
         for line in buf.lines() {
             let (key, val): (String, Json) = serde_json::from_str(&line.unwrap()).unwrap();
             rdb.set(key, Arc::new(val));
@@ -635,15 +637,6 @@ impl InMemDb {
             Json::Bool(false) => self.eval(rhs),
             _ => Err("bad type"),            
         }
-    }
-}
-
-fn scalars_op<G:Fn(f64, f64) -> f64>(x: &Number, y: &Number, g: G) -> Json {
-    match (x.as_f64(), y.as_f64()) {
-        (Some(x), Some(y)) => Json::from(g(x, y)),
-        (Some(x), None) => Json::from(g(x as f64, y.as_f64().unwrap())),
-        (None, Some(y)) => Json::from(g(x.as_f64().unwrap(), y as f64)),
-        (None, None) => Json::from(g(x.as_f64().unwrap(), y.as_f64().unwrap())),
     }
 }
 
