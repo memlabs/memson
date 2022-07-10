@@ -1,4 +1,8 @@
 
+use std::io::{self, BufRead, Write};
+use std::fs::OpenOptions;
+use std::fs::File;
+use std::path::Path;
 use serde_json::Map;
 use std::cmp::{Ord, Ordering};
 use std::sync::Arc;
@@ -7,6 +11,7 @@ use serde::{Deserialize,Serialize};
 pub use serde_json::Value as Json; 
 use serde_json::Number;
 use serde_json::json;
+
 
 pub type Result<T> = std::result::Result<T, &'static str>;
 
@@ -269,7 +274,7 @@ impl Query {
         }
     }
     
-    fn eval(&self, db: &mut Db) -> Result<Json> {
+    fn eval(&self, db: &mut InMemDb) -> Result<Json> {
         // evaluate from
         let docs = self.eval_from(db)?;
         // filter docs
@@ -307,7 +312,7 @@ impl Query {
         }
     }
 
-    fn eval_by(&self, docs: Vec<Json>, _db: &mut Db) -> Json {
+    fn eval_by(&self, docs: Vec<Json>, _db: &mut InMemDb) -> Json {
         let bys = match &self.by {
             Some(bys) => bys.clone(),
             None => return Json::Array(docs),
@@ -328,7 +333,7 @@ impl Query {
         Json::Object(aggs)
     }
 
-    fn eval_from(&self, db: &mut Db) -> Result<Vec<Json>> {
+    fn eval_from(&self, db: &mut InMemDb) -> Result<Vec<Json>> {
         let val = db.eval(self.from.clone())?;
         match val.into_json() {
             Json::Array(arr) => Ok(arr),
@@ -336,7 +341,7 @@ impl Query {
         }
     }
 
-    fn eval_where(&self, db: &mut Db, docs: Vec<Json>) -> Result<Vec<Json>> {
+    fn eval_where(&self, db: &mut InMemDb, docs: Vec<Json>) -> Result<Vec<Json>> {
         Ok(if let Some(filter) = self.filters.clone() {
             let cmd = filter.eval_docs(&docs);
             match db.eval(cmd)? {
@@ -429,13 +434,71 @@ impl Entry {
 
 }
 
-
 pub struct Db {
-    data: BTreeMap<String, Entry>,
+    rdb: InMemDb,
+    hdb: OnDiskDb,
 }
 
 impl Db {
-    pub fn new() -> Self {
+    pub fn open<P:AsRef<Path>>(path: P) -> io::Result<Self> {
+        let mut hdb = OnDiskDb::open(path)?;
+        let rdb = hdb.populate()?;
+        Ok(Db { rdb, hdb })
+    }
+
+    pub fn eval(&mut self, cmd: Cmd) -> Result<JsonVal> {
+        match cmd {
+            Cmd::Set(key, cmd) => {
+                let val = self.rdb.eval(*cmd)?;
+                self.hdb.insert(&key, val.as_ref()).map_err(|_| "cannot write to hdb")?;
+                let v =val.into_arc();
+                match self.rdb.set(key, v) {
+                    Some(val) => Ok(JsonVal::Arc(val)),
+                    None => Ok(JsonVal::Val(Json::Null))
+                }
+                
+                
+            }
+            _ => unimplemented!()
+        }
+    }
+}
+
+struct OnDiskDb {
+    file: File,
+}
+
+impl OnDiskDb {
+    fn open<P:AsRef<Path>>(path: P) -> std::io::Result<OnDiskDb> {
+        
+        let file = OpenOptions::new().append(true).create(true).read(true).open(path)?;
+        Ok(OnDiskDb{ file })
+    }
+
+    fn populate(&mut self) -> io::Result<InMemDb> {
+        let mut rdb = InMemDb::new();
+        let mut buf = io::BufReader::new(&mut self.file);
+        for line in buf.lines() {
+            let (key, val): (String, Json) = serde_json::from_str(&line.unwrap()).unwrap();
+            rdb.set(key, Arc::new(val));
+        }
+        Ok(rdb)
+    }
+
+    fn insert(&mut self, key: &str, val: &Json) -> std::io::Result<()> {
+        let entry = (key, val);
+        let s = serde_json::to_string(&entry).unwrap() + "\n";
+        self.file.write(s.as_bytes()).map(|_| ())
+    }
+}
+
+
+struct InMemDb {
+    data: BTreeMap<String, Entry>,
+}
+
+impl InMemDb {
+    fn new() -> Self {
         Self {
             data: BTreeMap::new(),
         }
@@ -511,8 +574,8 @@ impl Db {
             Cmd::Min(arg) => self.eval_unary_cmd(*arg, min),
             Cmd::Mul(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, mul),
             Cmd::NotEq(lhs, rhs) => self.eval_binary_cmd(*lhs, *rhs, not_eq),
-            Cmd::Product(arg) => unimplemented!(),
-            Cmd::Products(args) => unimplemented!(),
+            Cmd::Product(_arg) => unimplemented!(),
+            Cmd::Products(_args) => unimplemented!(),
             Cmd::Rm(key) => {
                 match self.data.remove(&key) {
                     Some(entry) => Ok(JsonVal::Arc(entry.val)),

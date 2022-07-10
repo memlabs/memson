@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-actix-web="*"
+futures = { version = "0.3.0", features = ["thread-pool"]}
 serde = { version = "*", features=["derive"]}
 serde_json="*"
-sled="*"
-
-
+tokio = { version = "1.0.0", features = ["full", "tracing"] }
+tokio-util = { version = "0.7.0",  features = ["full"] }
+tokio-stream = { version = "0.1" }
 
 [dev-dependencies]
 approx_eq = "*"
